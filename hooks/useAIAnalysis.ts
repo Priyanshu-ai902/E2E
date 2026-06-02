@@ -21,7 +21,7 @@ export function useAIAnalysis() {
     { id: 'analyze', label: 'AI Code Review', status: 'pending' },
   ]);
 
-  const startAnalysis = useCallback(async (owner: string, repo: string, number: number) => {
+  const startAnalysis = useCallback(async (owner: string, repo: string, number: number, sha?: string) => {
     setState('fetching');
     setAnalysis(null);
     setIsCached(false);
@@ -34,6 +34,10 @@ export function useAIAnalysis() {
     try {
       const response = await fetch(`/api/analyze/${owner}/${repo}/pull/${number}`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ sha }),
       });
 
       if (!response.ok) {

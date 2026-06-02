@@ -31,6 +31,10 @@ export interface GitHubPR {
   updated_at: string;
   html_url: string;
   diff_url: string;
+  head: {
+    sha: string;
+    ref: string;
+  };
 }
 
 export interface PRFile {

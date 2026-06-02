@@ -1,15 +1,15 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { NextResponse } from "next/server";
-import { fetchPRDiff } from "@/lib/github/diffs";
-import { analyzeDiff } from "@/lib/ai/analyzer";
+import { analyzePR } from "@/lib/ai/analyzer";
 import { fetchPullRequest } from "@/lib/github/pullRequests";
-import { getAnalysisByPR, saveAnalysis } from "@/lib/db/queries";
+import { getAnalysisRunByPR, saveAnalysisRun } from "@/lib/db/queries";
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ owner: string; repo: string; number: string }> }
 ) {
+  const startTime = performance.now();
   const session = await getServerSession(authOptions);
 
   if (!session || !session.accessToken) {
@@ -24,47 +24,93 @@ export async function POST(
   }
 
   try {
-    // 1. Fetch latest PR metadata from GitHub to get current SHA
-    const prData = await fetchPullRequest(session.accessToken as string, owner, repo, pullNumber);
-    const currentSha = prData.head.sha;
-    const prTitle = prData.title;
+    // 1. Try to get SHA from request body for immediate cache check
+    const body = await request.json().catch(() => ({}));
+    let currentSha = body.sha;
 
-    // 2. Check DB for existing analysis with the same commit SHA
-    const cachedAnalysis = await getAnalysisByPR(owner, repo, pullNumber, currentSha);
+    console.log(`[Cache Lookup] Starting for ${owner}/${repo}#${pullNumber}${currentSha ? ` @ ${currentSha}` : ''}`);
 
-    if (cachedAnalysis) {
-      console.log(`[Cache Hit] Returning cached analysis for ${owner}/${repo}#${pullNumber} @ ${currentSha}`);
-      return NextResponse.json({
-        cached: true,
-        analysis: {
-          summary: cachedAnalysis.summary,
-          risks: cachedAnalysis.risks,
-          importantChanges: cachedAnalysis.importantChanges,
-          recommendations: cachedAnalysis.recommendations,
-        }
-      });
+    // 2. If SHA is provided, check cache IMMEDIATELY
+    if (currentSha) {
+      const cachedRun = await getAnalysisRunByPR(owner, repo, pullNumber, currentSha);
+      if (cachedRun) {
+        const endTime = performance.now();
+        console.log(`[Cache Hit] Returning cached structured analysis for ${owner}/${repo}#${pullNumber} @ ${currentSha}`);
+        console.log(`[Cache Return Time] ${Math.round(endTime - startTime)}ms`);
+        
+        return NextResponse.json({
+          cached: true,
+          analysis: {
+            summary: cachedRun.summary || "No summary available.",
+            risks: [],
+            importantChanges: [],
+            recommendations: [],
+            ruleFindings: cachedRun.findings || [],
+            metrics: {
+              security: cachedRun.securityScore ?? 100,
+              performance: cachedRun.performanceScore ?? 100,
+              architecture: cachedRun.architectureScore ?? 100,
+              overall: cachedRun.overallScore ?? 100
+            }
+          }
+        });
+      }
     }
 
-    console.log(`[Cache Miss] Running Gemini analysis for ${owner}/${repo}#${pullNumber} @ ${currentSha}`);
+    // 3. If no SHA or cache miss with SHA, fetch latest PR metadata from GitHub
+    console.log(`[Cache Miss] Fetching latest PR metadata from GitHub for ${owner}/${repo}#${pullNumber}`);
+    const prData = await fetchPullRequest(session.accessToken as string, owner, repo, pullNumber);
+    const latestSha = prData.head.sha;
 
-    // 3. fetch PR diff
-    const diff = await fetchPRDiff(session.accessToken as string, owner, repo, pullNumber);
+    // 4. If we didn't have a SHA or the one we had was different, check cache again with latest SHA
+    if (latestSha !== currentSha) {
+      currentSha = latestSha;
+      const cachedRun = await getAnalysisRunByPR(owner, repo, pullNumber, currentSha);
+
+      if (cachedRun) {
+        const endTime = performance.now();
+        console.log(`[Cache Hit] Returning cached structured analysis for ${owner}/${repo}#${pullNumber} @ ${currentSha}`);
+        console.log(`[Cache Return Time] ${Math.round(endTime - startTime)}ms`);
+
+        return NextResponse.json({
+          cached: true,
+          analysis: {
+            summary: cachedRun.summary || "No summary available.",
+            risks: [],
+            importantChanges: [],
+            recommendations: [],
+            ruleFindings: cachedRun.findings || [],
+            metrics: {
+              security: cachedRun.securityScore ?? 100,
+              performance: cachedRun.performanceScore ?? 100,
+              architecture: cachedRun.architectureScore ?? 100,
+              overall: cachedRun.overallScore ?? 100
+            }
+          }
+        });
+      }
+    }
+
+    console.log(`[Cache Miss] Running deep analysis for ${owner}/${repo}#${pullNumber} @ ${currentSha}`);
+
+    // 5. Run full analysis (Rules + Gemini)
+    const analysis = await analyzePR(session.accessToken as string, owner, repo, pullNumber, currentSha);
     
-    // 4. Analyze with Gemini
-    const analysis = await analyzeDiff(diff);
-    
-    // 5. Store in Neon DB
-    await saveAnalysis({
+    // 6. Store in Neon DB
+    await saveAnalysisRun({
       repoOwner: owner,
       repoName: repo,
       prNumber: pullNumber,
       commitSha: currentSha,
-      prTitle: prTitle,
       summary: analysis.summary,
-      risks: analysis.risks,
-      importantChanges: analysis.importantChanges,
-      recommendations: analysis.recommendations,
-    });
+      securityScore: analysis.metrics.security,
+      performanceScore: analysis.metrics.performance,
+      architectureScore: analysis.metrics.architecture,
+      overallScore: analysis.metrics.overall,
+    }, analysis.ruleFindings);
+
+    const endTime = performance.now();
+    console.log(`[Analysis Complete] Total time: ${Math.round(endTime - startTime)}ms`);
 
     return NextResponse.json({
       cached: false,

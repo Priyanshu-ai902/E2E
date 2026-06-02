@@ -1,30 +1,45 @@
 import { getOctokit } from './octokit';
 import { isFileExcluded } from './filters';
 
+export interface PRFileDiff {
+  filename: string;
+  patch: string;
+  status: string;
+}
+
+export const fetchPRFiles = async (
+  accessToken: string,
+  owner: string,
+  repo: string,
+  pullNumber: number
+): Promise<PRFileDiff[]> => {
+  const octokit = getOctokit(accessToken);
+  
+  const { data: files } = await octokit.pulls.listFiles({
+    owner,
+    repo,
+    pull_number: pullNumber,
+    per_page: 100,
+  });
+
+  return files
+    .filter((file) => !isFileExcluded(file.filename) && !!file.patch)
+    .map(file => ({
+      filename: file.filename,
+      patch: file.patch!,
+      status: file.status,
+    }));
+};
+
 export const fetchPRDiff = async (
   accessToken: string,
   owner: string,
   repo: string,
   pullNumber: number
 ): Promise<string> => {
-  const octokit = getOctokit(accessToken);
-  
-  // Use the Files API to get individual patches
-  const { data: files } = await octokit.pulls.listFiles({
-    owner,
-    repo,
-    pull_number: pullNumber,
-    per_page: 100, // Limit to 100 files for now
-  });
+  const files = await fetchPRFiles(accessToken, owner, repo, pullNumber);
 
-  const filteredFiles = files.filter((file) => {
-    return !isFileExcluded(file.filename) && !!file.patch;
-  });
-
-  // Combine patches into a single string, with headers
-  const fullDiff = filteredFiles
+  return files
     .map((file) => `File: ${file.filename}\n${file.patch}`)
     .join('\n\n');
-
-  return fullDiff;
 };

@@ -33,7 +33,7 @@ export default function Dashboard() {
     if (pr.number === selectedPR?.number) return;
     setSelectedPR(pr);
     if (selectedRepo) {
-      startAnalysis(selectedRepo.owner.login, selectedRepo.name, pr.number);
+      startAnalysis(selectedRepo.owner.login, selectedRepo.name, pr.number, pr.head.sha);
     }
   };
 

@@ -5,13 +5,48 @@ import { type AIProcessingState } from '@/hooks/useAIAnalysis';
 import { type AnalysisResult } from '@/types/github';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Sparkles, AlertTriangle, CheckCircle2, ListChecks, Info, Zap, Terminal } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
+import { 
+  Sparkles, 
+  AlertTriangle, 
+  CheckCircle2, 
+  ListChecks, 
+  Zap, 
+  Terminal, 
+  ShieldCheck, 
+  Box, 
+  BarChart3, 
+  ShieldAlert, 
+  Rocket, 
+  Code2 
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface PRAnalysisPanelProps {
   analysis: AnalysisResult | null;
   state: AIProcessingState;
   isCached?: boolean;
 }
+
+const ScoreCard = ({ title, score, icon: Icon, colorClass }: { title: string, score: number, icon: any, colorClass: string }) => (
+  <div className="glass-morphism rounded-2xl p-4 border border-white/5 flex flex-col gap-3">
+    <div className="flex items-center justify-between">
+      <div className={cn("p-2 rounded-lg bg-opacity-10", colorClass.replace('bg-', 'bg-').replace('500', '500/10'))}>
+        <Icon className={cn("w-4 h-4", colorClass.replace('bg-', 'text-'))} />
+      </div>
+      <span className="text-xl font-bold text-white">{score}%</span>
+    </div>
+    <div className="space-y-1">
+      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{title}</div>
+      <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
+        <div 
+          className={cn("h-full transition-all duration-1000", colorClass)} 
+          style={{ width: `${score}%` }} 
+        />
+      </div>
+    </div>
+  </div>
+);
 
 export function PRAnalysisPanel({ analysis, state, isCached }: PRAnalysisPanelProps) {
   const [streamedSummary, setStreamedSummary] = useState('');
@@ -137,30 +172,38 @@ export function PRAnalysisPanel({ analysis, state, isCached }: PRAnalysisPanelPr
 
   if (!analysis) return null;
 
+  const metrics = analysis.metrics || { security: 100, performance: 100, architecture: 100, overall: 100 };
+  const ruleFindings = analysis.ruleFindings || [];
+  const risks = analysis.risks || [];
+  const recommendations = analysis.recommendations || [];
+
   // Main Content State
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-slate-900/30 border-l border-white/5 overflow-hidden">
       <div className="flex-1 overflow-y-auto custom-scrollbar scroll-smooth pr-1">
         <div className="p-8 space-y-8 max-w-5xl mx-auto pb-32">
+          
+          {/* Risk Scores Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both">
+            <ScoreCard title="Security" score={metrics.security} icon={ShieldCheck} colorClass="bg-red-500" />
+            <ScoreCard title="Performance" score={metrics.performance} icon={Zap} colorClass="bg-amber-500" />
+            <ScoreCard title="Architecture" score={metrics.architecture} icon={Box} colorClass="bg-blue-500" />
+            <ScoreCard title="Overall" score={metrics.overall} icon={BarChart3} colorClass="bg-emerald-500" />
+          </div>
+
           {/* Summary Card */}
-          <div className="flex flex-col space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <div className="flex flex-col space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200 fill-mode-both">
             <div className="flex items-center gap-2 flex-shrink-0">
               <div className="h-px flex-1 bg-slate-800" />
               <div className="flex items-center gap-3 px-4">
-                <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 text-nowrap">
                   <Sparkles className="w-3 h-3 text-cyan-400" />
                   AI Executive Summary
                 </h2>
                 {isCached && (
                   <Badge variant="outline" className="text-[10px] h-5 bg-cyan-500/10 text-cyan-400 border-cyan-500/20 animate-in fade-in zoom-in duration-500">
                     <Zap className="w-2.5 h-2.5 mr-1" />
-                    Cached Analysis
-                  </Badge>
-                )}
-                {!isCached && state === 'completed' && (
-                  <Badge variant="outline" className="text-[10px] h-5 bg-purple-500/10 text-purple-400 border-purple-500/20 animate-in fade-in zoom-in duration-500">
-                    <Sparkles className="w-2.5 h-2.5 mr-1" />
-                    Fresh Analysis
+                    Cached
                   </Badge>
                 )}
               </div>
@@ -180,26 +223,80 @@ export function PRAnalysisPanel({ analysis, state, isCached }: PRAnalysisPanelPr
             </div>
           </div>
 
-          {/* Two Column Layout for Details */}
-          <div className="grid lg:grid-cols-2 gap-8">
+          {/* Structured Findings */}
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-300 fill-mode-both">
+            <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center border border-cyan-500/20">
+                <Code2 className="w-4 h-4 text-cyan-400" />
+              </div>
+              Rule Engine Findings
+            </h2>
+            
+            <div className="grid gap-3">
+              {ruleFindings.length === 0 ? (
+                <div className="glass-morphism rounded-2xl p-8 border border-white/5 text-center space-y-2">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto opacity-50" />
+                  <p className="text-slate-400 text-sm">No deterministic issues found. Great job!</p>
+                </div>
+              ) : (
+                ruleFindings.map((finding, idx) => (
+                  <div key={idx} className="glass-morphism rounded-2xl border border-white/5 overflow-hidden group hover:border-white/10 transition-all">
+                    <div className="p-4 flex items-start gap-4">
+                      <div className={cn("p-2 rounded-lg flex-shrink-0", 
+                        finding.category === 'security' ? 'bg-red-500/10 text-red-400' :
+                        finding.category === 'performance' ? 'bg-amber-500/10 text-amber-400' :
+                        'bg-blue-500/10 text-blue-400'
+                      )}>
+                        {finding.category === 'security' ? <ShieldAlert className="w-4 h-4" /> :
+                         finding.category === 'performance' ? <Rocket className="w-4 h-4" /> :
+                         <Box className="w-4 h-4" />}
+                      </div>
+                      <div className="flex-1 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-bold text-slate-200">{finding.title}</h3>
+                          <Badge variant="outline" className={cn("text-[10px] uppercase",
+                            finding.severity === 'critical' ? 'border-red-500/50 text-red-400 bg-red-500/5' :
+                            finding.severity === 'high' ? 'border-orange-500/50 text-orange-400 bg-orange-500/5' :
+                            finding.severity === 'medium' ? 'border-amber-500/50 text-amber-400 bg-amber-500/5' :
+                            'border-blue-500/50 text-blue-400 bg-blue-500/5'
+                          )}>
+                            {finding.severity}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-slate-400 leading-relaxed">{finding.description}</p>
+                        {finding.file && (
+                          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-white/5">
+                            <span className="text-[10px] font-mono text-slate-500">{finding.file}{finding.line ? `:${finding.line}` : ''}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* AI Insights & Recommendations */}
+          <div className="grid lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-400 fill-mode-both">
             {/* Risks & Vulnerabilities */}
-            <div className="space-y-4 animate-in fade-in slide-in-from-left-4 duration-700 delay-200 fill-mode-both">
+            <div className="space-y-4">
               <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center border border-red-500/20">
                   <AlertTriangle className="w-4 h-4 text-red-400" />
                 </div>
-                Risks & Bugs
+                AI Risk Analysis
               </h2>
               <div className="space-y-3">
-                {analysis.risks.length === 0 ? (
+                {risks.length === 0 ? (
                   <div className="p-4 rounded-xl border border-green-500/10 bg-green-500/5 text-green-400 text-sm flex items-center gap-2">
                      <CheckCircle2 className="w-4 h-4" /> No significant risks detected.
                   </div>
                 ) : (
-                  analysis.risks.map((risk, idx) => (
+                  risks.map((risk, idx) => (
                     <div key={idx} className="glass-hover rounded-xl p-4 border border-red-500/10 flex items-start gap-3 group transition-all">
                       <div className="w-6 h-6 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center flex-shrink-0 text-[10px] font-black border border-red-500/20">
-                        ERR
+                        RISK
                       </div>
                       <p className="text-slate-300 text-sm group-hover:text-slate-100 transition-colors leading-relaxed">{risk}</p>
                     </div>
@@ -208,41 +305,21 @@ export function PRAnalysisPanel({ analysis, state, isCached }: PRAnalysisPanelPr
               </div>
             </div>
 
-            {/* Important Changes */}
-            <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-700 delay-300 fill-mode-both">
+            {/* Recommendations Section */}
+            <div className="space-y-4">
               <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center border border-cyan-500/20">
-                  <ListChecks className="w-4 h-4 text-cyan-400" />
+                <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center border border-purple-500/20">
+                  <Sparkles className="w-4 h-4 text-purple-400" />
                 </div>
-                Key Modalities
+                Recommendations
               </h2>
               <div className="space-y-3">
-                {analysis.importantChanges.map((change, idx) => (
-                  <div key={idx} className="glass-hover rounded-xl p-4 border border-cyan-500/10 flex items-start gap-3 group transition-all">
-                    <div className="w-6 h-6 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center flex-shrink-0 border border-cyan-500/20">
-                      <CheckCircle2 className="w-3 h-3" />
-                    </div>
-                    <p className="text-slate-300 text-sm group-hover:text-slate-100 transition-colors leading-relaxed">{change}</p>
+                {recommendations.map((rec, idx) => (
+                  <div key={idx} className="glass-morphism rounded-xl p-4 border border-purple-500/10 hover:border-purple-500/30 transition-all bg-purple-500/5 group">
+                    <p className="text-slate-300 text-sm leading-relaxed group-hover:text-slate-100 transition-colors">{rec}</p>
                   </div>
                 ))}
               </div>
-            </div>
-          </div>
-
-          {/* Recommendations Section */}
-          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-500 fill-mode-both">
-            <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center border border-purple-500/20">
-                <Sparkles className="w-4 h-4 text-purple-400" />
-              </div>
-              Strategic Recommendations
-            </h2>
-            <div className="grid md:grid-cols-2 gap-4">
-              {analysis.recommendations.map((rec, idx) => (
-                <div key={idx} className="glass-morphism rounded-2xl p-6 border border-purple-500/10 hover:border-purple-500/30 transition-all bg-purple-500/5 group">
-                  <p className="text-slate-300 text-sm leading-relaxed group-hover:text-slate-100 transition-colors">{rec}</p>
-                </div>
-              ))}
             </div>
           </div>
         </div>
