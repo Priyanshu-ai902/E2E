@@ -1,26 +1,21 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { type AIProcessingState } from '@/hooks/useAIAnalysis';
 import { type AnalysisResult } from '@/types/github';
 import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Progress } from '@/components/ui/progress';
-import { 
-  Sparkles, 
-  AlertTriangle, 
-  CheckCircle2, 
-  ListChecks, 
-  Zap, 
-  Terminal, 
-  ShieldCheck, 
-  Box, 
-  BarChart3, 
-  ShieldAlert, 
-  Rocket, 
-  Code2 
-} from 'lucide-react';
+import { AlertTriangle, Terminal, Zap, PanelRight, RefreshCw, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { RiskScoreRing } from './risk-score-ring';
+import { RiskIntelligencePanel } from './risk-intelligence-panel';
+import { AnalysisSections } from './analysis-sections';
+import { TestingTabs } from './testing-tabs';
+import { AgentLoading, buildAgentSteps } from './agent-loading';
+import { useTestPipeline } from '@/hooks/useTestPipeline';
+import { useAI } from '@/app/dashboard/layout';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 interface PRAnalysisPanelProps {
   analysis: AnalysisResult | null;
@@ -28,28 +23,68 @@ interface PRAnalysisPanelProps {
   isCached?: boolean;
 }
 
-const ScoreCard = ({ title, score, icon: Icon, colorClass }: { title: string, score: number, icon: any, colorClass: string }) => (
-  <div className="glass-morphism rounded-2xl p-4 border border-white/5 flex flex-col gap-3">
-    <div className="flex items-center justify-between">
-      <div className={cn("p-2 rounded-lg bg-opacity-10", colorClass.replace('bg-', 'bg-').replace('500', '500/10'))}>
-        <Icon className={cn("w-4 h-4", colorClass.replace('bg-', 'text-'))} />
-      </div>
-      <span className="text-xl font-bold text-white">{score}%</span>
-    </div>
-    <div className="space-y-1">
-      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{title}</div>
-      <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
-        <div 
-          className={cn("h-full transition-all duration-1000", colorClass)} 
-          style={{ width: `${score}%` }} 
-        />
-      </div>
-    </div>
-  </div>
-);
-
 export function PRAnalysisPanel({ analysis, state, isCached }: PRAnalysisPanelProps) {
   const [streamedSummary, setStreamedSummary] = useState('');
+  const [showRiskPanel, setShowRiskPanel] = useState(true);
+  const { startAnalysis } = useAI();
+  const [activeAction, setActiveAction] = useState<'ai-only' | 'full' | null>(null);
+
+  const isExecuting = state === 'fetching' || state === 'analyzing';
+
+  const handleReanalyzeAI = () => {
+    if (!analysis || !analysis.prNumber) return;
+    setActiveAction('ai-only');
+    toast.loading("Regenerating AI Analysis...", { id: "reanalyze-toast" });
+    startAnalysis(
+      analysis.repoOwner || "",
+      analysis.repoName || "",
+      analysis.prNumber,
+      analysis.commitSha || "",
+      'ai-only'
+    );
+  };
+
+  const handleFullReanalyze = () => {
+    if (!analysis || !analysis.prNumber) return;
+    setActiveAction('full');
+    toast.loading("Running fresh analysis...", { id: "reanalyze-toast" });
+    startAnalysis(
+      analysis.repoOwner || "",
+      analysis.repoName || "",
+      analysis.prNumber,
+      analysis.commitSha || "",
+      'full'
+    );
+  };
+
+  useEffect(() => {
+    if (activeAction) {
+      if (state === 'completed') {
+        toast.success(
+          activeAction === 'ai-only' 
+            ? "AI analysis regenerated successfully" 
+            : "Fresh analysis completed", 
+          { id: "reanalyze-toast" }
+        );
+        setActiveAction(null);
+      } else if (state === 'failed') {
+        toast.error("Analysis failed. Please try again.", { id: "reanalyze-toast" });
+        setActiveAction(null);
+      }
+    }
+  }, [state, activeAction]);
+
+  const pipelineEnabled = state === 'completed' && !!analysis?.id;
+  const { testPlan, prediction, queue, playwrightTests, loading: pipelineLoading } = useTestPipeline(
+    analysis?.id,
+    pipelineEnabled
+  );
+
+  const agentSteps = buildAgentSteps(state, pipelineLoading);
+  const showAgentLoading =
+    state === 'fetching' ||
+    state === 'analyzing' ||
+    (state === 'completed' && pipelineEnabled && (pipelineLoading.strategy || pipelineLoading.coverage || pipelineLoading.playwright));
 
   useEffect(() => {
     if (state === 'completed' && analysis?.summary) {
@@ -59,271 +94,161 @@ export function PRAnalysisPanel({ analysis, state, isCached }: PRAnalysisPanelPr
         setStreamedSummary((prev) => prev + analysis.summary.charAt(i));
         i++;
         if (i >= analysis.summary.length) clearInterval(interval);
-      }, 5);
+      }, 4);
       return () => clearInterval(interval);
-    } else {
-      setStreamedSummary('');
     }
+    setStreamedSummary('');
   }, [state, analysis]);
 
-  // Loading & Analyzing States
-  if (state === 'fetching' || state === 'analyzing') {
-    return (
-      <div className="flex-1 min-h-0 flex flex-col bg-slate-900/40 border-l border-white/5 overflow-hidden">
-        <div className="flex-1 overflow-y-auto custom-scrollbar scroll-smooth">
-          <div className="p-8 space-y-10 max-w-5xl mx-auto w-full pb-24">
-            {/* Premium Header Skeleton */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 flex items-center justify-center border border-cyan-500/20">
-                  <Sparkles className="w-6 h-6 text-cyan-400 animate-pulse" />
-                </div>
-                <div className="space-y-2">
-                  <div className="h-4 w-32 bg-slate-800 rounded animate-pulse" />
-                  <div className="h-6 w-64 bg-slate-700 rounded animate-pulse" />
-                </div>
-              </div>
-              <Badge variant="outline" className="bg-slate-800/50 border-cyan-500/30 text-cyan-400 animate-pulse px-4 py-1">
-                {state === 'fetching' ? 'Retrieving Data' : 'AI Reasoning...'}
-              </Badge>
-            </div>
-
-            {/* Main Card Skeleton */}
-            <div className="glass-morphism rounded-3xl border border-white/5 overflow-hidden h-[400px] flex flex-col">
-              <div className="h-1 bg-gradient-to-r from-cyan-500 via-purple-500 to-cyan-500 animate-shimmer" style={{ backgroundSize: '200% 100%' }} />
-              <div className="p-8 space-y-6 flex-1">
-                <Skeleton className="h-8 w-1/3 bg-slate-800" />
-                <div className="space-y-4">
-                  <Skeleton className="h-4 w-full bg-slate-800/50" />
-                  <Skeleton className="h-4 w-11/12 bg-slate-800/50" />
-                  <Skeleton className="h-4 w-10/12 bg-slate-800/50" />
-                  <Skeleton className="h-4 w-full bg-slate-800/50" />
-                  <Skeleton className="h-4 w-9/12 bg-slate-800/50" />
-                </div>
-              </div>
-            </div>
-
-            {/* Bottom Grid Skeleton */}
-            <div className="grid grid-cols-2 gap-8 h-64">
-              <div className="glass-morphism rounded-2xl border border-white/5 p-6 space-y-4">
-                <Skeleton className="h-6 w-1/2 bg-slate-800" />
-                <Skeleton className="h-32 bg-slate-800/30 rounded-xl" />
-              </div>
-              <div className="glass-morphism rounded-2xl border border-white/5 p-6 space-y-4">
-                <Skeleton className="h-6 w-1/2 bg-slate-800" />
-                <Skeleton className="h-32 bg-slate-800/30 rounded-xl" />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Error State
   if (state === 'failed') {
     return (
-      <div className="flex-1 flex flex-col bg-slate-900/30 border-l border-white/5 items-center justify-center">
-        <div className="text-center space-y-4 max-w-md p-8 glass rounded-3xl border border-red-500/20">
-          <AlertTriangle className="w-12 h-12 text-red-400 mx-auto opacity-50" />
-          <h3 className="text-xl font-bold text-slate-200">Analysis Failed</h3>
-          <p className="text-slate-400 text-sm">
-            We encountered an error while analyzing this PR. This could be due to a very large diff or a temporary issue with the Gemini API.
-          </p>
+      <>
+        <div className="flex-1 flex flex-col items-center justify-center bg-[#050505] border-l border-white/[0.06]">
+          <div className="text-center max-w-sm p-8 kryon-card rounded-lg">
+            <AlertTriangle className="w-10 h-10 text-red-400/60 mx-auto mb-4" />
+            <h3 className="text-base font-semibold text-white">Analysis failed</h3>
+            <p className="text-sm text-white/40 mt-2">
+              We encountered an error analyzing this PR. Try again or check back later.
+            </p>
+          </div>
         </div>
-      </div>
+        <RiskIntelligencePanel analysis={null} state={state} isOpen={showRiskPanel} />
+      </>
     );
   }
 
-  // Idle State
+  if (showAgentLoading) {
+    return (
+      <>
+        <div className="flex-1 min-h-0 flex flex-col bg-[#050505] border-l border-white/[0.06] overflow-hidden">
+          <AgentLoading steps={agentSteps} />
+        </div>
+        <RiskIntelligencePanel analysis={analysis} state={state} isOpen={showRiskPanel} />
+      </>
+    );
+  }
+
   if (state === 'idle' && !analysis) {
     return (
-      <div className="flex-1 flex flex-col bg-slate-900/30 border-l border-white/5 items-center justify-center">
-        <div className="text-center space-y-6 max-w-lg p-12">
-          <div className="relative mx-auto w-24 h-24">
-             <div className="absolute inset-0 bg-cyan-500/20 blur-2xl rounded-full animate-pulse" />
-             <div className="relative w-24 h-24 rounded-3xl bg-slate-800/50 flex items-center justify-center border border-white/10 shadow-2xl backdrop-blur-xl">
-               <Terminal className="w-10 h-10 text-slate-500" />
-             </div>
-          </div>
-          <div className="space-y-2">
-            <h3 className="text-2xl font-bold text-slate-200 tracking-tight">Select a Pull Request</h3>
-            <p className="text-slate-400 text-sm leading-relaxed">
-              Pick a PR from the sidebar to initialize the AI analysis agent. 
-              Gemini will perform a multi-layer scan for quality, security, and architectural alignment.
+      <>
+        <div className="flex-1 flex flex-col items-center justify-center bg-[#050505] border-l border-white/[0.06]">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35 }}
+            className="text-center max-w-md px-8"
+          >
+            <div className="w-14 h-14 rounded-lg bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mx-auto mb-5">
+              <Terminal className="w-6 h-6 text-white/25" />
+            </div>
+            <h3 className="text-lg font-semibold text-white">AI Analysis Workspace</h3>
+            <p className="text-sm text-white/40 mt-2 leading-relaxed">
+              Select a pull request to initialize risk analysis, coverage prediction, and strategic test planning.
             </p>
-          </div>
-          <div className="grid grid-cols-2 gap-3 pt-4">
-            <div className="p-4 rounded-xl border border-white/5 bg-white/[0.02] text-left">
-              <Zap className="w-4 h-4 text-cyan-400 mb-2" />
-              <div className="text-xs font-bold text-slate-300">Fast Scan</div>
-              <div className="text-[10px] text-slate-500">Under 30s analysis</div>
-            </div>
-            <div className="p-4 rounded-xl border border-white/5 bg-white/[0.02] text-left">
-              <CheckCircle2 className="w-4 h-4 text-purple-400 mb-2" />
-              <div className="text-xs font-bold text-slate-300">Deep Insights</div>
-              <div className="text-[10px] text-slate-500">AST-based reasoning</div>
-            </div>
-          </div>
+          </motion.div>
         </div>
-      </div>
+        <RiskIntelligencePanel analysis={null} state={state} isOpen={showRiskPanel} />
+      </>
     );
   }
 
   if (!analysis) return null;
 
   const metrics = analysis.metrics || { security: 100, performance: 100, architecture: 100, overall: 100 };
-  const ruleFindings = analysis.ruleFindings || [];
-  const risks = analysis.risks || [];
-  const recommendations = analysis.recommendations || [];
+  const isStreaming = state === 'completed' && streamedSummary.length < (analysis.summary?.length || 0);
 
-  // Main Content State
   return (
-    <div className="flex-1 min-h-0 flex flex-col bg-slate-900/30 border-l border-white/5 overflow-hidden">
-      <div className="flex-1 overflow-y-auto custom-scrollbar scroll-smooth pr-1">
-        <div className="p-8 space-y-8 max-w-5xl mx-auto pb-32">
-          
-          {/* Risk Scores Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both">
-            <ScoreCard title="Security" score={metrics.security} icon={ShieldCheck} colorClass="bg-red-500" />
-            <ScoreCard title="Performance" score={metrics.performance} icon={Zap} colorClass="bg-amber-500" />
-            <ScoreCard title="Architecture" score={metrics.architecture} icon={Box} colorClass="bg-blue-500" />
-            <ScoreCard title="Overall" score={metrics.overall} icon={BarChart3} colorClass="bg-emerald-500" />
-          </div>
-
-          {/* Summary Card */}
-          <div className="flex flex-col space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200 fill-mode-both">
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <div className="h-px flex-1 bg-slate-800" />
-              <div className="flex items-center gap-3 px-4">
-                <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 text-nowrap">
-                  <Sparkles className="w-3 h-3 text-cyan-400" />
-                  AI Executive Summary
-                </h2>
+    <>
+      <div className="flex-1 min-h-0 flex flex-col bg-[#050505] border-l border-white/[0.06] overflow-hidden">
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          <div className="p-6 space-y-6 max-w-3xl mx-auto pb-20">
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+              className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/[0.06] pb-4"
+            >
+              <div>
+                <p className="text-[10px] font-medium text-white/30 uppercase tracking-wider">Analysis Workspace</p>
+                <h1 className="text-base font-semibold text-white mt-0.5">
+                  PR #{analysis.prNumber} Risk Report
+                </h1>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
                 {isCached && (
-                  <Badge variant="outline" className="text-[10px] h-5 bg-cyan-500/10 text-cyan-400 border-cyan-500/20 animate-in fade-in zoom-in duration-500">
+                  <Badge variant="outline" className="text-[10px] border-cyan-500/20 text-cyan-400 bg-cyan-500/5 h-7">
                     <Zap className="w-2.5 h-2.5 mr-1" />
                     Cached
                   </Badge>
                 )}
-              </div>
-              <div className="h-px flex-1 bg-slate-800" />
-            </div>
-            
-            <div className="glass-morphism rounded-3xl border border-white/5 relative overflow-hidden shadow-2xl">
-              <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-cyan-500 via-purple-500 to-cyan-500 z-10" />
-              <div className="p-8">
-                <p className="text-slate-200 text-lg leading-relaxed font-medium">
-                  {streamedSummary}
-                  {state === 'completed' && streamedSummary.length < (analysis.summary?.length || 0) && (
-                    <span className="inline-block w-2 h-5 bg-cyan-400 ml-1 animate-pulse" />
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleReanalyzeAI}
+                  disabled={isExecuting}
+                  className="h-7 text-xs border-white/[0.08] hover:bg-white/[0.04] text-white/80"
+                >
+                  <RefreshCw className={cn("w-3 h-3 mr-1.5", activeAction === 'ai-only' && "animate-spin")} />
+                  Reanalyze AI
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleFullReanalyze}
+                  disabled={isExecuting}
+                  className="h-7 text-xs border-white/[0.08] hover:bg-white/[0.04] text-white/80"
+                >
+                  <RotateCcw className={cn("w-3 h-3 mr-1.5", activeAction === 'full' && "animate-spin")} />
+                  Full Reanalyze
+                </Button>
+
+                <button
+                  onClick={() => setShowRiskPanel(!showRiskPanel)}
+                  className={cn(
+                    "p-1.5 rounded-md border text-white/40 hover:text-white transition-all cursor-pointer hover:bg-white/[0.04] bg-transparent h-7",
+                    showRiskPanel ? "border-white/[0.08]" : "border-white/[0.04]"
                   )}
-                </p>
+                  title={showRiskPanel ? "Hide Risk Intelligence" : "Show Risk Intelligence"}
+                >
+                  <PanelRight className="w-3.5 h-3.5" />
+                </button>
               </div>
-            </div>
-          </div>
+            </motion.div>
 
-          {/* Structured Findings */}
-          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-300 fill-mode-both">
-            <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center border border-cyan-500/20">
-                <Code2 className="w-4 h-4 text-cyan-400" />
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, delay: 0.05 }}
+              className="kryon-card rounded-lg p-5 xl:hidden"
+            >
+              <div className="grid grid-cols-4 gap-2">
+                <RiskScoreRing label="Risk" score={metrics.overall} size="sm" />
+                <RiskScoreRing label="Security" score={metrics.security} size="sm" />
+                <RiskScoreRing label="Architecture" score={metrics.architecture} size="sm" />
+                <RiskScoreRing label="Performance" score={metrics.performance} size="sm" />
               </div>
-              Rule Engine Findings
-            </h2>
-            
-            <div className="grid gap-3">
-              {ruleFindings.length === 0 ? (
-                <div className="glass-morphism rounded-2xl p-8 border border-white/5 text-center space-y-2">
-                  <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto opacity-50" />
-                  <p className="text-slate-400 text-sm">No deterministic issues found. Great job!</p>
-                </div>
-              ) : (
-                ruleFindings.map((finding, idx) => (
-                  <div key={idx} className="glass-morphism rounded-2xl border border-white/5 overflow-hidden group hover:border-white/10 transition-all">
-                    <div className="p-4 flex items-start gap-4">
-                      <div className={cn("p-2 rounded-lg flex-shrink-0", 
-                        finding.category === 'security' ? 'bg-red-500/10 text-red-400' :
-                        finding.category === 'performance' ? 'bg-amber-500/10 text-amber-400' :
-                        'bg-blue-500/10 text-blue-400'
-                      )}>
-                        {finding.category === 'security' ? <ShieldAlert className="w-4 h-4" /> :
-                         finding.category === 'performance' ? <Rocket className="w-4 h-4" /> :
-                         <Box className="w-4 h-4" />}
-                      </div>
-                      <div className="flex-1 space-y-1">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-sm font-bold text-slate-200">{finding.title}</h3>
-                          <Badge variant="outline" className={cn("text-[10px] uppercase",
-                            finding.severity === 'critical' ? 'border-red-500/50 text-red-400 bg-red-500/5' :
-                            finding.severity === 'high' ? 'border-orange-500/50 text-orange-400 bg-orange-500/5' :
-                            finding.severity === 'medium' ? 'border-amber-500/50 text-amber-400 bg-amber-500/5' :
-                            'border-blue-500/50 text-blue-400 bg-blue-500/5'
-                          )}>
-                            {finding.severity}
-                          </Badge>
-                        </div>
-                        <p className="text-xs text-slate-400 leading-relaxed">{finding.description}</p>
-                        {finding.file && (
-                          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-white/5">
-                            <span className="text-[10px] font-mono text-slate-500">{finding.file}{finding.line ? `:${finding.line}` : ''}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+            </motion.div>
 
-          {/* AI Insights & Recommendations */}
-          <div className="grid lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-400 fill-mode-both">
-            {/* Risks & Vulnerabilities */}
-            <div className="space-y-4">
-              <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center border border-red-500/20">
-                  <AlertTriangle className="w-4 h-4 text-red-400" />
-                </div>
-                AI Risk Analysis
-              </h2>
-              <div className="space-y-3">
-                {risks.length === 0 ? (
-                  <div className="p-4 rounded-xl border border-green-500/10 bg-green-500/5 text-green-400 text-sm flex items-center gap-2">
-                     <CheckCircle2 className="w-4 h-4" /> No significant risks detected.
-                  </div>
-                ) : (
-                  risks.map((risk, idx) => (
-                    <div key={idx} className="glass-hover rounded-xl p-4 border border-red-500/10 flex items-start gap-3 group transition-all">
-                      <div className="w-6 h-6 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center flex-shrink-0 text-[10px] font-black border border-red-500/20">
-                        RISK
-                      </div>
-                      <p className="text-slate-300 text-sm group-hover:text-slate-100 transition-colors leading-relaxed">{risk}</p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+            <AnalysisSections
+              analysis={analysis}
+              streamedSummary={streamedSummary}
+              isStreaming={isStreaming}
+            />
 
-            {/* Recommendations Section */}
-            <div className="space-y-4">
-              <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center border border-purple-500/20">
-                  <Sparkles className="w-4 h-4 text-purple-400" />
-                </div>
-                Recommendations
-              </h2>
-              <div className="space-y-3">
-                {recommendations.map((rec, idx) => (
-                  <div key={idx} className="glass-morphism rounded-xl p-4 border border-purple-500/10 hover:border-purple-500/30 transition-all bg-purple-500/5 group">
-                    <p className="text-slate-300 text-sm leading-relaxed group-hover:text-slate-100 transition-colors">{rec}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <TestingTabs
+              analysisRunId={analysis.id}
+              testPlan={testPlan}
+              prediction={prediction}
+              queue={queue}
+              playwrightTests={playwrightTests}
+              loading={pipelineLoading}
+            />
           </div>
         </div>
       </div>
-    </div>
+      <RiskIntelligencePanel analysis={analysis} state={state} isOpen={showRiskPanel} />
+    </>
   );
 }

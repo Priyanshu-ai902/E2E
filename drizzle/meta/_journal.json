@@ -15,6 +15,48 @@
       "when": 1780143456075,
       "tag": "0001_blue_roland_deschain",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780410692241,
+      "tag": "0002_sparkling_excalibur",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780547125655,
+      "tag": "0003_workable_oracle",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780573727720,
+      "tag": "0004_complex_vampiro",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780574455497,
+      "tag": "0005_regular_echo",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1780580396050,
+      "tag": "0006_dizzy_norrin_radd",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781891960614,
+      "tag": "0007_awesome_cannonball",
+      "breakpoints": true
     }
   ]
 }

@@ -1,40 +1,33 @@
-import type { Metadata } from 'next'
-import { Analytics } from '@vercel/analytics/next'
-import { AuthProvider } from '@/components/providers/auth-provider'
-import { Toaster } from '@/components/ui/sonner'
-import './globals.css'
+import type { Metadata } from 'next';
+import { Inter } from 'next/font/google';
+import { Analytics } from '@vercel/analytics/next';
+import { AuthProvider } from '@/components/providers/auth-provider';
+import { Toaster } from '@/components/ui/sonner';
+import './globals.css';
+
+const inter = Inter({
+  subsets: ['latin'],
+  weight: ['500', '600', '700'],
+  variable: '--font-inter',
+});
 
 export const metadata: Metadata = {
-  title: 'CodeReview AI - AI-Powered Code Analysis',
-  description: 'Intelligent code review and analysis for pull requests using advanced AI',
-  generator: 'v0.app',
+  title: 'Kryon — PR Risk Intelligence',
+  description: 'Mission control for pull request risk. AI-powered risk analysis, test planning, and merge decisions.',
   icons: {
-    icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-    ],
-    apple: '/apple-icon.png',
+    icon: '/face.png',
+    apple: '/face.png',
   },
-}
+};
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode
+  children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark bg-background">
-      <body className="font-sans antialiased bg-background text-foreground">
+    <html lang="en" className="dark">
+      <body className={`${inter.variable} font-sans antialiased bg-background text-foreground`}>
         <AuthProvider>
           {children}
           <Toaster position="top-right" richColors theme="dark" />
@@ -42,5 +35,5 @@ export default function RootLayout({
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>
-  )
+  );
 }

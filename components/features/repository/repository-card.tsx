@@ -2,8 +2,9 @@
 
 import { GitHubRepo } from '@/types/github';
 import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
-import { Star, GitPullRequest, Globe, Lock, Code2 } from 'lucide-react';
+import { Star, Globe, Lock, Code2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { motion } from 'framer-motion';
 
 interface RepositoryCardProps {
   repository: GitHubRepo;
@@ -13,60 +14,50 @@ interface RepositoryCardProps {
 
 export function RepositoryCard({ repository, onSelect, isSelected }: RepositoryCardProps) {
   return (
-    <Card 
+    <motion.button
       onClick={() => onSelect(repository)}
-      className={`relative group cursor-pointer transition-all duration-300 overflow-hidden ${
-        isSelected 
-          ? 'glass glow-neon-blue border-cyan-500/50 bg-cyan-500/10' 
-          : 'glass-hover hover:bg-white/5 border-white/5'
-      }`}
-    >
-      <div className="p-6 space-y-4">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-slate-800 border border-white/5 group-hover:border-cyan-500/30 transition-colors">
-              <Code2 className="w-5 h-5 text-cyan-400" />
-            </div>
-            <div>
-              <h3 className="font-bold text-slate-100 group-hover:text-cyan-400 transition-colors">
-                {repository.name}
-              </h3>
-              <p className="text-xs text-slate-500">{repository.owner.login}</p>
-            </div>
-          </div>
-          <Badge variant="outline" className="text-[10px] uppercase tracking-tighter bg-slate-800/50">
-            {!repository.private ? (
-              <Globe className="w-3 h-3 mr-1" />
-            ) : (
-              <Lock className="w-3 h-3 mr-1" />
-            )}
-            {repository.private ? 'Private' : 'Public'}
-          </Badge>
-        </div>
-
-        <p className="text-sm text-slate-400 line-clamp-2 h-10">
-          {repository.description || 'No description provided.'}
-        </p>
-
-        <div className="flex items-center gap-4 pt-2">
-          <div className="flex items-center gap-1.5 text-xs text-slate-500">
-            <Star className="w-3.5 h-3.5" />
-            {repository.stargazers_count}
-          </div>
-          {repository.language && (
-            <div className="flex items-center gap-1.5 text-xs text-slate-500">
-              <div className="w-2 h-2 rounded-full bg-cyan-500" />
-              {repository.language}
-            </div>
-          )}
-        </div>
-      </div>
-      
-      {isSelected && (
-        <div className="absolute top-0 right-0 p-2">
-          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-        </div>
+      whileHover={{ y: -2 }}
+      transition={{ duration: 0.15 }}
+      className={cn(
+        'w-full text-left kryon-card kryon-card-hover rounded-lg p-5 transition-colors',
+        isSelected && 'border-cyan-500/25 bg-cyan-500/5 kryon-glow-sm'
       )}
-    </Card>
+    >
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-md bg-white/[0.04] border border-white/[0.06] flex items-center justify-center">
+            <Code2 className="w-4 h-4 text-cyan-400" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-white">{repository.name}</h3>
+            <p className="text-xs text-white/35">{repository.owner.login}</p>
+          </div>
+        </div>
+        <Badge variant="outline" className="text-[10px] border-white/[0.08] text-white/35 bg-transparent">
+          {repository.private ? (
+            <><Lock className="w-3 h-3 mr-1" />Private</>
+          ) : (
+            <><Globe className="w-3 h-3 mr-1" />Public</>
+          )}
+        </Badge>
+      </div>
+
+      <p className="text-xs text-white/40 line-clamp-2 h-8 mb-3">
+        {repository.description || 'No description provided.'}
+      </p>
+
+      <div className="flex items-center gap-4 text-[11px] text-white/30">
+        <span className="flex items-center gap-1">
+          <Star className="w-3 h-3" />
+          {repository.stargazers_count}
+        </span>
+        {repository.language && (
+          <span className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+            {repository.language}
+          </span>
+        )}
+      </div>
+    </motion.button>
   );
 }

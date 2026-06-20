@@ -14,9 +14,12 @@ export async function GET(
   }
 
   const { owner, repo } = await params;
+  console.log(`[API_ROUTE] Fetching PRs for ${owner}/${repo}`);
 
   try {
     const pulls = await fetchPullRequests(session.accessToken as string, owner, repo);
+    console.log(`[API_ROUTE] GitHub API response count: ${pulls?.length || 0}`);
+    console.log(`[API_ROUTE] Final response count: ${pulls?.length || 0}`);
     return NextResponse.json(pulls);
   } catch (error: any) {
     console.error("Fetch Pulls Error:", error);

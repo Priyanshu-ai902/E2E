@@ -18,6 +18,7 @@ node_modules
 
 gemini.md
 phase.md
+devin.md
 
 .env
 .env.example

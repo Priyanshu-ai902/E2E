@@ -3,8 +3,10 @@
 import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
-import { Github, ShieldCheck, Zap, Sparkles } from 'lucide-react';
+import { KryonLogo } from '@/components/layout/kryon-logo';
+import { Github, ShieldCheck, Zap } from 'lucide-react';
 import { toast } from 'sonner';
+import { motion } from 'framer-motion';
 
 export default function Auth() {
   const { login, isLoading: authLoading } = useAuth();
@@ -14,7 +16,7 @@ export default function Auth() {
     setIsLoading(true);
     try {
       await login();
-    } catch (err) {
+    } catch {
       toast.error('GitHub connection failed');
       setIsLoading(false);
     }
@@ -23,65 +25,53 @@ export default function Auth() {
   if (authLoading) return null;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6 overflow-hidden relative">
-      {/* Animated background elements */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-cyan-500/10 blur-[120px] rounded-full animate-pulse" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/10 blur-[120px] rounded-full animate-pulse" />
-      </div>
-
-      {/* Auth Card */}
-      <div className="relative z-10 w-full max-w-xl">
-        <div className="text-center mb-12 space-y-4 animate-in fade-in slide-in-from-top-4 duration-700">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-[10px] font-bold uppercase tracking-widest">
-            <Sparkles className="w-3 h-3" /> Secure Agent Access
+    <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center p-6">
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
+        className="w-full max-w-md"
+      >
+        <div className="text-center mb-10">
+          <div className="flex justify-center mb-6">
+            <KryonLogo size="lg" />
           </div>
-          <h1 className="text-5xl font-extrabold tracking-tight">
-            CodeReview <span className="bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">AI Agent</span>
-          </h1>
-          <p className="text-slate-400 text-lg max-w-md mx-auto">
-            Authorize our AI agent to access your GitHub repositories and begin automated PR reviews.
+          <h1 className="text-2xl font-semibold text-white">Sign in to Kryon</h1>
+          <p className="text-sm text-white/40 mt-2">
+            Connect your GitHub account to begin PR risk analysis.
           </p>
         </div>
 
-        {/* Action Card */}
-        <div className="glass-morphism rounded-3xl p-10 border border-white/5 shadow-2xl space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200 fill-mode-both">
-          <div className="space-y-4">
-            <Button
-              onClick={handleGitHubLogin}
-              disabled={isLoading}
-              className="w-full h-16 bg-white text-black hover:bg-slate-200 transition-all text-lg font-bold rounded-2xl flex items-center justify-center gap-3 relative overflow-hidden group"
-            >
-              {isLoading ? (
-                <div className="h-5 w-5 border-2 border-black/20 border-t-black rounded-full animate-spin" />
-              ) : (
-                <>
-                  <Github className="w-6 h-6" />
-                  Continue with GitHub
-                </>
-              )}
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
-            </Button>
-            
-            <p className="text-[10px] text-center text-slate-500 font-medium uppercase tracking-widest">
-              By connecting, you agree to our terms and privacy policy
-            </p>
-          </div>
+        <div className="kryon-card rounded-lg p-6 space-y-6">
+          <Button
+            onClick={handleGitHubLogin}
+            disabled={isLoading}
+            className="w-full h-11 bg-white text-[#050505] hover:bg-white/90 font-semibold"
+          >
+            {isLoading ? (
+              <div className="h-4 w-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+            ) : (
+              <>
+                <Github className="w-5 h-5 mr-2" />
+                Continue with GitHub
+              </>
+            )}
+          </Button>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-2">
-              <ShieldCheck className="w-5 h-5 text-cyan-400" />
-              <h3 className="text-xs font-bold text-slate-200">Secure OAuth</h3>
-              <p className="text-[10px] text-slate-500">Industry standard secure authentication via GitHub.</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 rounded-md bg-white/[0.02] border border-white/[0.06]">
+              <ShieldCheck className="w-4 h-4 text-cyan-400 mb-2" />
+              <p className="text-[11px] font-medium text-white/70">Secure OAuth</p>
+              <p className="text-[10px] text-white/30 mt-0.5">GitHub authentication</p>
             </div>
-            <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-2">
-              <Zap className="w-5 h-5 text-purple-400" />
-              <h3 className="text-xs font-bold text-slate-200">Read-Only</h3>
-              <p className="text-[10px] text-slate-500">We only request read access to your repositories.</p>
+            <div className="p-3 rounded-md bg-white/[0.02] border border-white/[0.06]">
+              <Zap className="w-4 h-4 text-cyan-400 mb-2" />
+              <p className="text-[11px] font-medium text-white/70">Read-only</p>
+              <p className="text-[10px] text-white/30 mt-0.5">Repository access only</p>
             </div>
           </div>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

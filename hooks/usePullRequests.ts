@@ -20,6 +20,8 @@ export function usePullRequests(owner?: string, repo?: string) {
           throw new Error('Failed to fetch pull requests');
         }
         const data = await response.json();
+        console.log(`[HOOK] API response:`, data);
+        console.log(`[HOOK] prs.length: ${data.length}`);
         setPulls(data);
       } catch (err: any) {
         setError(err.message);
