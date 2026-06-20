@@ -19,6 +19,8 @@ export async function validateSchema() {
   }
   
   const tables = [
+    'users',
+    'sessions',
     'pr_analyses',
     'analysis_runs',
     'analysis_findings',
@@ -35,7 +37,9 @@ export async function validateSchema() {
       // Use tagged template for Neon SQL calls to avoid deprecation warnings
       // Note: Table names cannot be parameters in standard SQL, but here we are checking existence
       // Since these are hardcoded table names from our list, it's safe.
-      if (table === 'pr_analyses') await sql`SELECT 1 FROM pr_analyses LIMIT 1`;
+      if (table === 'users') await sql`SELECT 1 FROM users LIMIT 1`;
+      else if (table === 'sessions') await sql`SELECT 1 FROM sessions LIMIT 1`;
+      else if (table === 'pr_analyses') await sql`SELECT 1 FROM pr_analyses LIMIT 1`;
       else if (table === 'analysis_runs') await sql`SELECT 1 FROM analysis_runs LIMIT 1`;
       else if (table === 'analysis_findings') await sql`SELECT 1 FROM analysis_findings LIMIT 1`;
       else if (table === 'generated_test_plans') await sql`SELECT 1 FROM generated_test_plans LIMIT 1`;

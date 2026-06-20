@@ -1,10 +1,9 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getCustomSession } from "@/lib/auth-custom";
 import { NextResponse } from "next/server";
 import { fetchUserRepos } from "@/lib/github/repositories";
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
+  const session = await getCustomSession();
 
   if (!session || !session.accessToken) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

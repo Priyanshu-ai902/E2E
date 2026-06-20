@@ -57,6 +57,13 @@
       "when": 1781891960614,
       "tag": "0007_awesome_cannonball",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781958209662,
+      "tag": "0008_unusual_swarm",
+      "breakpoints": true
     }
   ]
 }

@@ -12,7 +12,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'Kryon — PR Risk Intelligence',
+  title: 'Kryon - PR Risk Intelligence',
   description: 'Mission control for pull request risk. AI-powered risk analysis, test planning, and merge decisions.',
   icons: {
     icon: '/face.png',

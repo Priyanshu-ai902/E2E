@@ -50,6 +50,13 @@ export default function Dashboard() {
         riskLevel: analysis.riskLevel || 'LOW',
         overallScore: analysis.metrics?.overall || 100,
         analyzedAt: new Date().toISOString(),
+        findings: (analysis.ruleFindings || []).map(f => ({
+          category: f.category,
+          severity: f.severity.toUpperCase(),
+          title: f.title,
+          description: f.description,
+          file: f.file || undefined
+        }))
       });
     }
   }, [state, analysis, selectedRepo, selectedPR, addToHistory]);

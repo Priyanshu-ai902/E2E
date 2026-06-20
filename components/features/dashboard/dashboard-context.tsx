@@ -14,6 +14,13 @@ export interface AnalysisHistoryEntry {
   riskLevel: string;
   overallScore: number;
   analyzedAt: string;
+  findings?: {
+    category: string;
+    severity: string;
+    title: string;
+    description: string;
+    file?: string;
+  }[];
 }
 
 interface DashboardContextValue {

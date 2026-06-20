@@ -1,32 +1,17 @@
 'use client';
 
-import { useSession, signIn, signOut } from 'next-auth/react';
+import { useAuthContext } from '@/components/providers/auth-provider';
 
 export function useAuth() {
-  const { data: session, status } = useSession();
-  const isLoading = status === 'loading';
-
-  const login = async () => {
-    await signIn('github', { callbackUrl: '/dashboard' });
-  };
-
-  const logout = async () => {
-    await signOut({ callbackUrl: '/' });
-  };
-
-  const user = session?.user ? {
-    id: (session.user as any).id || session.user.email || '1',
-    email: session.user.email || '',
-    name: session.user.name || '',
-    image: session.user.image || '',
-  } : null;
+  const { user, isLoading, isAuthenticated, login, logout, refreshSession } = useAuthContext();
 
   return { 
     user, 
     isLoading, 
     login, 
     logout,
-    isAuthenticated: !!session,
-    status
+    isAuthenticated,
+    refreshSession,
+    status: isLoading ? 'loading' : isAuthenticated ? 'authenticated' : 'unauthenticated'
   };
 }

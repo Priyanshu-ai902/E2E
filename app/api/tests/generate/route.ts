@@ -1,5 +1,4 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getCustomSession } from "@/lib/auth-custom";
 import { NextResponse } from "next/server";
 import { generateTestPlan } from "@/lib/ai/test-generator";
 import { getTestPlanByAnalysisRunId, saveTestPlan } from "@/lib/db/queries";
@@ -11,7 +10,7 @@ import { fetchPullRequestFiles } from "@/lib/github/pullRequests";
 import { verifyPipelineState, handlePipelineError } from "@/lib/ai/pipeline";
 
 export async function POST(request: Request) {
-  const session = await getServerSession(authOptions);
+  const session = await getCustomSession();
 
   if (!session || !session.accessToken) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

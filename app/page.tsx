@@ -39,195 +39,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence, useAnimation, useInView, useMotionValue, useTransform, animate } from 'framer-motion';
 
-// Mock Scenarios for the Interactive Product Demo Section
-const SCENARIOS = [
-  {
-    id: 'security',
-    label: '🔓 Security & Privileges',
-    filename: 'lib/auth.ts',
-    branch: 'feature/rbac-staff',
-    description: 'Relaxing privilege access level validation in admin operations.',
-    diff: [
-      { type: 'normal', text: 'export async function getAdminSettings(req, res) {' },
-      { type: 'normal', text: '  const session = await getSession(req);' },
-      { type: 'deletion', text: '-  if (session.user.role !== "admin") {' },
-      { type: 'addition', text: '+  if (session.user.role !== "admin" && session.user.role !== "staff") {' },
-      { type: 'normal', text: '    return res.status(403).json({ error: "Unauthorized" });' },
-      { type: 'normal', text: '  }' },
-      { type: 'normal', text: '  return res.json(db.settings.findMany());' },
-      { type: 'normal', text: '}' }
-    ],
-    aiFindings: {
-      summary: 'Relaxes authorization controls by granting staff roles equivalent access to administrative database operations.',
-      risks: [
-        'Privilege escalation: staff roles can query and overwrite global configuration parameters.',
-        'Broken Function Level Authorization (OWASP API1:2023).'
-      ],
-      recommendations: [
-        'Enforce strict role verification via middleware parameters.',
-        'Segregate settings endpoints into staff-read and admin-write schemas.'
-      ],
-      riskLevel: 'HIGH',
-      blastRadius: {
-        frontend: false,
-        backend: true,
-        database: true,
-        infrastructure: false
-      }
-    },
-    testStrategy: {
-      strategy: 'Validate boundary checks specifically mapping role classifications against authorization returns.',
-      tests: [
-        {
-          title: 'Assert ADMIN role can view configuration',
-          category: 'SECURITY',
-          priority: 'CRITICAL',
-          scenario: 'Authenticate as admin, request settings, expect status code 200.',
-          expected: 'Return value includes database settings structure.'
-        },
-        {
-          title: 'Assert STAFF role cannot write settings',
-          category: 'SECURITY',
-          priority: 'CRITICAL',
-          scenario: 'Authenticate as staff, attempt POST request to settings endpoint, expect status code 403.',
-          expected: 'Return value contains Access Denied structure.'
-        }
-      ]
-    },
-    playwrightCode: `import { test, expect } from '@playwright/test';
 
-test('staff user cannot retrieve administrative settings', async ({ request }) => {
-  const response = await request.get('/api/admin/settings', {
-    headers: { 'Cookie': 'session_token=staff_mock_cookie_129' }
-  });
-  
-  expect(response.status()).toBe(403);
-  const data = await response.json();
-  expect(data.error).toContain('Unauthorized');
-});`
-  },
-  {
-    id: 'concurrency',
-    label: '🔄 Concurrency Risk',
-    filename: 'lib/db/token-refresh.ts',
-    branch: 'fix/token-rotation-race',
-    description: 'Preventing double-spend database lock during concurrent JWT rotation.',
-    diff: [
-      { type: 'normal', text: 'export async function rotateRefreshToken(token) {' },
-      { type: 'normal', text: '  const stored = await db.tokens.findFirst({ token });' },
-      { type: 'normal', text: '  if (stored.isUsed) {' },
-      { type: 'normal', text: '    await revokeAllFamily(stored.familyId);' },
-      { type: 'deletion', text: '-    throw new SecurityError("Token reuse detected!");' },
-      { type: 'addition', text: '+    // Handle concurrent refresh overlap window' },
-      { type: 'addition', text: '+    if (Date.now() - stored.usedAt < 500) return stored.newAccessToken;' },
-      { type: 'addition', text: '+    throw new SecurityError("Token reuse detected!");' },
-      { type: 'normal', text: '  }' }
-    ],
-    aiFindings: {
-      summary: 'Mitigates token rotation race conditions where high-frequency duplicate requests trigger false-positive token family revoking.',
-      risks: [
-        'Race conditions under unstable HTTP connection retries.',
-        'Denial of service for legitimate users experiencing overlapping token calls.'
-      ],
-      recommendations: [
-        'Enforce atomic updates on token status changes.',
-        'Limit the overlap grace window to exactly 300ms max.'
-      ],
-      riskLevel: 'MEDIUM',
-      blastRadius: {
-        frontend: false,
-        backend: true,
-        database: true,
-        infrastructure: false
-      }
-    },
-    testStrategy: {
-      strategy: 'Simulate high concurrency JWT token requests within microsecond margins.',
-      tests: [
-        {
-          title: 'Token Rotation Grace Window Validation',
-          category: 'REGRESSION',
-          priority: 'HIGH',
-          scenario: 'Rotate same token twice in overlapping 50ms calls, verify second call receives the same Access Token without revoking session.',
-          expected: 'Status returns successfully with matching access tokens.'
-        }
-      ]
-    },
-    playwrightCode: `import { test, expect } from '@playwright/test';
-
-test('race condition token refresh is de-duplicated', async ({ request }) => {
-  const [res1, res2] = await Promise.all([
-    request.post('/api/auth/refresh', { data: { token: 'refresh_tk_99' } }),
-    request.post('/api/auth/refresh', { data: { token: 'refresh_tk_99' } })
-  ]);
-  
-  expect(res1.status()).toBe(200);
-  expect(res2.status()).toBe(200);
-  
-  const d1 = await res1.json();
-  const d2 = await res2.json();
-  expect(d1.accessToken).toBe(d2.accessToken);
-});`
-  },
-  {
-    id: 'grpc',
-    label: '📡 RPC Schema Impact',
-    filename: 'services/user-service.ts',
-    branch: 'refactor/grpc-exception-contract',
-    description: 'Replacing raw text errors with standardized status mapping.',
-    diff: [
-      { type: 'normal', text: 'async function getUserData(call, callback) {' },
-      { type: 'normal', text: '  try {' },
-      { type: 'normal', text: '    const user = await db.users.find(call.request.id);' },
-      { type: 'deletion', text: '-    if (!user) throw new Error("User index empty");' },
-      { type: 'addition', text: '+    if (!user) {' },
-      { type: 'addition', text: '+      return callback({ code: grpc.status.NOT_FOUND, message: "User not found" });' },
-      { type: 'addition', text: '+    }' },
-      { type: 'normal', text: '    callback(null, user);' },
-      { type: 'normal', text: '  } catch (err) {' }
-    ],
-    aiFindings: {
-      summary: 'Standardizes runtime user lookup failures from plain JS exceptions to mapped gRPC error statuses.',
-      risks: [
-        'Client-side crashes if calling integrations expect raw connection aborts rather than gRPC statuses.',
-        'Incompatibility with existing JSON serializers in api-gateway modules.'
-      ],
-      recommendations: [
-        'Run contract compatibility tests on API Gateway routes.',
-        'Update documentation for integration dependencies.'
-      ],
-      riskLevel: 'LOW',
-      blastRadius: {
-        frontend: false,
-        backend: true,
-        database: false,
-        infrastructure: false
-      }
-    },
-    testStrategy: {
-      strategy: 'Assert error response formats against RPC schemas.',
-      tests: [
-        {
-          title: 'RPC contract status mapping',
-          category: 'BUSINESS_FLOW',
-          priority: 'HIGH',
-          scenario: 'Query a non-existent user ID, expect response code NOT_FOUND (5).',
-          expected: 'Response contains properly formatted gRPC status frame.'
-        }
-      ]
-    },
-    playwrightCode: `import { test, expect } from '@playwright/test';
-
-test('gRPC gateway maps lookup miss to NOT_FOUND', async ({ request }) => {
-  const response = await request.get('/api/users/missing_id_999');
-  
-  // Mapped from NOT_FOUND status
-  expect(response.status()).toBe(404);
-  const data = await response.json();
-  expect(data.code).toBe('NOT_FOUND');
-});`
-  }
-];
 
 // Custom ScrollReveal wrapper using Framer Motion
 function ScrollReveal({ children, className, delay = 0, y = 30 }: { children: React.ReactNode; className?: string; delay?: number; y?: number }) {
@@ -317,17 +129,30 @@ function AnimatedCounter({ value, suffix = '', duration = 2.5 }: { value: number
   return <span ref={ref} className="font-display font-bold">0{suffix}</span>;
 }
 
-// Custom FAQ Accordion Item component
+// Custom FAQ Accordion Item component (Card Redesign)
 function FAQAccordionItem({ question, answer, isOpen, onClick }: { question: string; answer: string; isOpen: boolean; onClick: () => void }) {
   return (
-    <div className="border-b border-white/[0.04] py-5">
+    <div 
+      className={`rounded-xl border transition-all duration-300 relative overflow-hidden ${
+        isOpen 
+          ? 'border-cyan-500/30 bg-cyan-950/10 shadow-[0_0_30px_rgba(6,182,212,0.08)]' 
+          : 'border-zinc-800 bg-zinc-950/20 hover:border-cyan-500/20 hover:bg-cyan-950/5'
+      }`}
+    >
+      {/* Subtle hover glow overlay */}
+      <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/[0.005] to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+
       <button
         onClick={onClick}
-        className="w-full flex items-center justify-between text-left py-2 font-medium text-white hover:text-cyan-400 transition-colors duration-300"
+        className="w-full flex items-center justify-between text-left p-5 md:p-6 font-medium text-white cursor-pointer group"
       >
-        <span className="font-display text-base md:text-lg font-semibold tracking-tight">{question}</span>
-        <div className={`w-8 h-8 rounded-full border border-white/[0.04] bg-white/[0.02] flex items-center justify-center transition-transform duration-300 ${isOpen ? 'rotate-180 border-cyan-500/25 bg-cyan-950/20 text-cyan-400' : 'text-zinc-500'}`}>
-          <ChevronDown className="w-4 h-4" />
+        <span className="font-display text-sm md:text-base font-semibold tracking-tight pr-4 transition-colors duration-300 group-hover:text-cyan-400">
+          {question}
+        </span>
+        <div className={`w-7 h-7 rounded-full border border-white/[0.04] bg-white/[0.02] flex items-center justify-center transition-all duration-300 flex-shrink-0 ${
+          isOpen ? 'rotate-180 border-cyan-500/30 bg-cyan-950/30 text-cyan-400' : 'text-zinc-500 group-hover:text-zinc-300'
+        }`}>
+          <ChevronDown className="w-3.5 h-3.5" />
         </div>
       </button>
       <AnimatePresence initial={false}>
@@ -336,12 +161,14 @@ function FAQAccordionItem({ question, answer, isOpen, onClick }: { question: str
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
+            transition={{ duration: 0.25, ease: 'easeInOut' }}
             className="overflow-hidden"
           >
-            <p className="text-zinc-400 text-sm md:text-base leading-relaxed pt-3 pb-2 pr-10">
-              {answer}
-            </p>
+            <div className="px-5 pb-5 md:px-6 md:pb-6 pt-0 border-t border-white/[0.02]">
+              <p className="text-zinc-400 text-xs md:text-sm leading-relaxed whitespace-pre-line text-left">
+                {answer}
+              </p>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -349,13 +176,94 @@ function FAQAccordionItem({ question, answer, isOpen, onClick }: { question: str
   );
 }
 
+const WORKFLOW_STEPS = [
+  {
+    step: '01',
+    title: 'Connect GitHub Repository',
+    desc: 'Securely authorize Kryon using GitHub OAuth to access repositories and pull requests.',
+    metadata: ['OAuth Connected', 'Repository Synced']
+  },
+  {
+    step: '02',
+    title: 'Select Pull Request',
+    desc: 'Choose the pull request that requires intelligence analysis and testing validation.',
+    metadata: ['PR #142', '24 Files Changed']
+  },
+  {
+    step: '03',
+    title: 'Understand Code Changes',
+    desc: 'Kryon analyzes modified files, dependencies, execution paths, and architectural impact.',
+    metadata: ['Files: 24', 'Services: 3', 'Dependencies: 8']
+  },
+  {
+    step: '04',
+    title: 'Detect Hidden Risk',
+    desc: 'Identify security vulnerabilities, regressions, access-control issues, and business logic risks.',
+    metadata: ['Security: 2', 'Regression: 5', 'Critical: 1']
+  },
+  {
+    step: '05',
+    title: 'Predict Coverage Gaps',
+    desc: 'Forecast which code paths are not covered by existing tests before deployment.',
+    metadata: ['Coverage: 81%', 'Gaps Found: 4']
+  },
+  {
+    step: '06',
+    title: 'Build Test Strategy',
+    desc: 'Generate deterministic Security, Regression, and Business Flow validation plans.',
+    metadata: ['Security Plan', 'Regression Plan', 'Business Flow Plan']
+  },
+  {
+    step: '07',
+    title: 'Generate Playwright Specs',
+    desc: 'Convert testing intelligence into executable Playwright test suites.',
+    metadata: ['Specs: 3', 'Scenarios: 12', 'Assertions: 47']
+  },
+  {
+    step: '08',
+    title: 'Review Merge Readiness',
+    desc: 'Provide risk scoring, deployment confidence, and merge recommendations.',
+    metadata: ['Risk Score: 18%', 'Confidence: High']
+  }
+];
+
+const STEP_ICONS = [
+  GitBranch,
+  GitPullRequest,
+  Code,
+  Shield,
+  Beaker,
+  Target,
+  Terminal,
+  CheckCircle2
+];
+
+const TABLET_ORDERS = [
+  'md:order-1',
+  'md:order-2',
+  'md:order-4',
+  'md:order-3',
+  'md:order-5',
+  'md:order-6',
+  'md:order-8',
+  'md:order-7'
+];
+
+const DESKTOP_ORDERS = [
+  'lg:order-1',
+  'lg:order-2',
+  'lg:order-3',
+  'lg:order-4',
+  'lg:order-8',
+  'lg:order-7',
+  'lg:order-6',
+  'lg:order-5'
+];
+
+
 export default function Landing() {
   const router = useRouter();
-  const [selectedScenario, setSelectedScenario] = useState(SCENARIOS[0]);
-  const [activeTab, setActiveTab] = useState<'risk' | 'strategy' | 'code'>('risk');
-  const [isScanning, setIsScanning] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [copiedCode, setCopiedCode] = useState(false);
   
   // Custom states for tracking scroll
   const [isScrolled, setIsScrolled] = useState(false);
@@ -368,6 +276,8 @@ export default function Landing() {
   const [pipelineStep, setPipelineStep] = useState(0);
   const [liveLatency, setLiveLatency] = useState(-8.4);
   const [liveRiskScore, setLiveRiskScore] = useState(14);
+  const [workflowStep, setWorkflowStep] = useState(0);
+  const [hoveredModule, setHoveredModule] = useState<number | null>(null);
 
   // Custom FAQ active index
   const [openFAQIndex, setOpenFAQIndex] = useState<number | null>(null);
@@ -436,18 +346,15 @@ export default function Landing() {
     return () => clearInterval(timer);
   }, []);
 
-  // Sync interactive console scan loading state
+  // Interval for workflow pipeline revamp animation loop (8 steps + merge ready = 9 states)
   useEffect(() => {
-    setIsScanning(true);
-    const timer = setTimeout(() => setIsScanning(false), 800);
-    return () => clearTimeout(timer);
-  }, [selectedScenario]);
+    const timer = setInterval(() => {
+      setWorkflowStep((prev) => (prev + 1) % 9);
+    }, 850);
+    return () => clearInterval(timer);
+  }, []);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(selectedScenario.playwrightCode);
-    setCopiedCode(true);
-    setTimeout(() => setCopiedCode(false), 2000);
-  };
+
 
   const smoothScrollTo = (id: string) => {
     const element = document.getElementById(id);
@@ -545,13 +452,7 @@ export default function Landing() {
 
           {/* CTA Action Buttons */}
           <div className="hidden md:flex items-center gap-4">
-            <Button
-              onClick={() => router.push('/auth')}
-              variant="ghost"
-              className="text-zinc-400 hover:text-white text-xs font-semibold px-4 cursor-pointer"
-            >
-              Dashboard
-            </Button>
+            
             <MagneticButton
               onClick={() => router.push('/auth')}
               className="relative px-5 py-2 rounded-md bg-gradient-to-r from-cyan-500 to-teal-500 text-black font-bold text-xs tracking-wide shadow-[0_0_20px_rgba(34,211,238,0.25)] hover:shadow-[0_0_30px_rgba(34,211,238,0.45)] transition-all duration-300 cursor-pointer"
@@ -607,203 +508,239 @@ export default function Landing() {
       </header>
 
       {/* Hero Section Container */}
-      <section className="relative max-w-7xl mx-auto px-6 pt-16 md:pt-28 pb-20 text-center">
+      <section className="relative max-w-[1440px] mx-auto px-6 md:px-10 xl:px-16 pt-16 md:pt-28 pb-20 text-center flex flex-col items-center overflow-x-hidden">
         
-        {/* Subtitle Badge */}
-        <ScrollReveal delay={0} y={15}>
-          <div 
-            onClick={() => router.push('/auth')}
-            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-cyan-500/20 bg-cyan-950/20 hover:bg-cyan-950/30 text-cyan-400 text-[11px] font-bold tracking-wide uppercase mb-8 cursor-pointer hover:border-cyan-500/40 transition-all duration-300"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>AI Risk Intelligence Platform</span>
-            <ChevronRight className="w-3.5 h-3.5 text-cyan-500" />
-          </div>
-        </ScrollReveal>
-
-        {/* Enterprise Title */}
-        <ScrollReveal delay={0.1} y={20}>
-          <h1 className="font-display text-4xl sm:text-6xl md:text-8xl font-extrabold tracking-tight leading-[1.05] text-gradient-white max-w-5xl mx-auto">
-            Understand PR Risk <br className="hidden sm:inline" /> Before Merge
-          </h1>
-        </ScrollReveal>
-
-        {/* Subtitle Description */}
-        <ScrollReveal delay={0.2} y={20}>
-          <p className="text-zinc-400 font-sans text-base sm:text-lg md:text-xl max-w-3xl mx-auto mt-6 leading-relaxed">
-            Kryon analyzes pull requests, predicts hidden risk, generates testing intelligence, and creates Playwright specifications before bugs reach production.
-          </p>
-        </ScrollReveal>
-
-        {/* Action CTAs */}
-        <ScrollReveal delay={0.3} y={20}>
-          <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto sm:max-w-none">
-            <MagneticButton
+        {/* Section 1: Hero Centered Copy Content */}
+        <div className="flex flex-col items-center text-center max-w-5xl mx-auto w-full">
+          {/* Subtitle Badge */}
+          <ScrollReveal delay={0} y={15}>
+            <div 
               onClick={() => router.push('/auth')}
-              className="w-full sm:w-auto px-8 h-13 rounded-lg bg-gradient-to-r from-cyan-500 to-teal-500 text-black font-bold text-sm tracking-wide shadow-[0_0_30px_rgba(34,211,238,0.2)] hover:shadow-[0_0_40px_rgba(34,211,238,0.4)] transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer group"
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-cyan-500/20 bg-cyan-950/20 hover:bg-cyan-950/30 text-cyan-400 text-[11px] font-bold tracking-wide uppercase mb-8 cursor-pointer hover:border-cyan-500/40 transition-all duration-300"
             >
-              <span>Start Free Analysis</span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-            </MagneticButton>
-
-            <Button
-              onClick={() => smoothScrollTo('workflow')}
-              variant="outline"
-              className="w-full sm:w-auto border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.06] hover:text-white text-zinc-300 h-13 px-8 rounded-lg text-sm font-semibold tracking-wide transition-all duration-300 cursor-pointer"
-            >
-              View Workflow
-            </Button>
-          </div>
-        </ScrollReveal>
-
-        {/* Security Indicator */}
-        <ScrollReveal delay={0.35} y={0}>
-          <div className="text-xs text-zinc-500 mt-5 flex items-center justify-center gap-1.5">
-            <Lock className="w-3.5 h-3.5 text-cyan-500/70" />
-            <span>Zero-Trust security. We process code transiently; no storage.</span>
-          </div>
-        </ScrollReveal>
-
-        {/* Hero Interactive Visualization Console */}
-        <ScrollReveal delay={0.4} y={35} className="mt-20">
-          <div className="relative rounded-2xl border border-white/[0.06] bg-zinc-950/40 p-2 shadow-[0_0_80px_rgba(0,0,0,0.8)] backdrop-blur-md max-w-5xl mx-auto overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-tr from-cyan-500/[0.03] via-transparent to-purple-500/[0.03] rounded-2xl pointer-events-none" />
-            
-            {/* Mock Header Controls */}
-            <div className="flex items-center justify-between border-b border-white/[0.04] bg-zinc-950/80 px-5 py-3.5 rounded-t-xl">
-              <div className="flex items-center gap-2">
-                <div className="flex gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-rose-500/40" />
-                  <span className="w-3 h-3 rounded-full bg-amber-500/40" />
-                  <span className="w-3 h-3 rounded-full bg-emerald-500/40" />
-                </div>
-                <span className="text-[10px] sm:text-xs text-zinc-500 font-mono ml-3 select-none">kryon-pipeline-visualizer.sh</span>
-              </div>
-              <div className="text-[10px] sm:text-xs text-cyan-400 font-mono flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-                <span>Live Intelligence Engine Scanning</span>
-              </div>
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>AI Risk Intelligence Platform</span>
+              <ChevronRight className="w-3.5 h-3.5 text-cyan-500" />
             </div>
+          </ScrollReveal>
 
-            {/* Inner Dashboard visual */}
-            <div className="p-6 md:p-8 bg-black/60 rounded-b-xl grid md:grid-cols-12 gap-8 text-left items-stretch">
+          {/* Enterprise Title */}
+          <ScrollReveal delay={0.1} y={20} className="w-full">
+            <h1 className="font-display font-extrabold tracking-tight leading-[1.05] text-gradient-white text-center text-6xl md:text-8xl max-w-5xl mx-auto">
+              <span className="block">Understand PR Risk</span>
+              <span className="block">Before Merge</span>
+            </h1>
+          </ScrollReveal>
+
+          {/* Subtitle Description */}
+          <ScrollReveal delay={0.2} y={20}>
+            <p className="text-zinc-400 font-sans text-base sm:text-lg md:text-xl max-w-3xl mx-auto mt-6 leading-relaxed text-center">
+              Kryon analyzes pull requests, predicts hidden risk, generates testing intelligence, and creates Playwright specifications before bugs reach production.
+            </p>
+          </ScrollReveal>
+
+          {/* Action CTAs */}
+          <ScrollReveal delay={0.3} y={20}>
+            <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto sm:max-w-none">
+              <MagneticButton
+                onClick={() => router.push('/auth')}
+                className="w-full sm:w-auto px-8 h-13 rounded-lg bg-gradient-to-r from-cyan-500 to-teal-500 text-black font-bold text-sm tracking-wide shadow-[0_0_30px_rgba(34,211,238,0.2)] hover:shadow-[0_0_40px_rgba(34,211,238,0.4)] transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer group"
+              >
+                <span>Start Free Analysis</span>
+                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              </MagneticButton>
+
+              <Button
+                onClick={() => smoothScrollTo('workflow')}
+                variant="outline"
+                className="w-full sm:w-auto border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.06] hover:text-white text-zinc-300 h-13 px-8 rounded-lg text-sm font-semibold tracking-wide transition-all duration-300 cursor-pointer"
+              >
+                View Workflow
+              </Button>
+            </div>
+          </ScrollReveal>
+
+          {/* Security Indicator */}
+          <ScrollReveal delay={0.35} y={0}>
+            <div className="text-xs text-zinc-500 mt-5 flex items-center justify-center gap-1.5">
+              <Lock className="w-3.5 h-3.5 text-cyan-500/70" />
+              <span>Zero-Trust security. We process code transiently; no storage.</span>
+            </div>
+          </ScrollReveal>
+        </div>
+
+        {/* Section 2: Full Width Dashboard Preview Showcase Container */}
+        <div className="w-full max-w-[1280px] md:max-w-[1400px] mt-16 md:mt-24 overflow-hidden relative flex justify-center items-center">
+          <ScrollReveal delay={0.4} y={35} className="w-full">
+            <div 
+              className="relative rounded-2xl border border-white/[0.06] bg-zinc-950/40 p-4 md:p-6 shadow-[0_0_100px_rgba(0,0,0,0.9)] backdrop-blur-md w-full overflow-hidden group aspect-[16/10] flex flex-col"
+            >
+              <div className="absolute inset-0 bg-gradient-to-tr from-cyan-500/[0.03] via-transparent to-purple-500/[0.03] rounded-2xl pointer-events-none" />
               
-              {/* Left Column: Visual Pipeline Steps */}
-              <div className="md:col-span-6 space-y-5">
-                <div className="text-[11px] text-zinc-500 font-bold font-mono tracking-wider uppercase mb-2">Analysis Processing Queue</div>
+              {/* Mock Header Controls */}
+              <div className="flex items-center justify-between border-b border-white/[0.04] bg-zinc-950/80 px-6 py-4.5 md:px-8 md:py-6 rounded-t-xl flex-none">
+                <div className="flex items-center gap-3">
+                  <div className="flex gap-2">
+                    <span className="w-3.5 h-3.5 rounded-full bg-rose-500/40" />
+                    <span className="w-3.5 h-3.5 rounded-full bg-amber-500/40" />
+                    <span className="w-3.5 h-3.5 rounded-full bg-emerald-500/40" />
+                  </div>
+                  <span className="text-[11px] md:text-sm text-zinc-500 font-mono ml-4 select-none">kryon-pipeline-visualizer.sh</span>
+                </div>
+                <div className="text-[11px] md:text-sm text-cyan-400 font-mono flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
+                  <span>Live Intelligence Engine Scanning</span>
+                </div>
+              </div>
+
+              {/* Inner Dashboard visual */}
+              <div className="p-4 md:p-8 bg-black/60 rounded-b-xl grid grid-cols-12 gap-6 md:gap-10 text-left items-stretch flex-1 overflow-hidden">
                 
-                <div className="space-y-4">
-                  {PIPELINE_PHASES.map((phase, idx) => {
-                    const isActive = idx === pipelineStep;
-                    return (
-                      <div 
-                        key={phase.id} 
-                        className={`relative flex items-center gap-4 p-3 rounded-xl border transition-all duration-500 ${isActive ? 'bg-zinc-900/50 border-cyan-500/30 shadow-[0_0_15px_rgba(34,211,238,0.06)] translate-x-2' : 'bg-transparent border-transparent opacity-50'}`}
-                      >
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center border transition-all duration-300 ${isActive ? `${phase.bg} ${phase.border} ring-2 ring-cyan-500/20` : 'bg-zinc-900 border-white/[0.04]'}`}>
-                          <phase.icon className={`w-5 h-5 ${isActive ? phase.color : 'text-zinc-500'}`} />
-                        </div>
-                        <div>
-                          <div className={`text-xs font-bold transition-colors ${isActive ? 'text-white' : 'text-zinc-400'}`}>{phase.label}</div>
-                          <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
-                            {isActive ? 'Synthesizing data delta...' : 'Processed successfully'}
-                          </div>
-                        </div>
-                        
-                        {/* Connecting moving node line indicator */}
-                        {idx < 4 && (
-                          <div className="absolute left-[29px] top-[46px] w-0.5 h-7 bg-zinc-900 pointer-events-none">
-                            {isActive && (
-                              <motion.div
-                                initial={{ top: 0 }}
-                                animate={{ top: '100%' }}
-                                transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
-                                className="absolute left-0 w-full h-2.5 bg-cyan-400 rounded-full"
-                              />
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Middle Border line */}
-              <div className="hidden md:block col-span-1 flex justify-center items-center">
-                <div className="h-full w-px bg-white/[0.04]" />
-              </div>
-
-              {/* Right Column: Live Floating Metrics */}
-              <div className="md:col-span-5 flex flex-col justify-between gap-6">
-                <div>
-                  <div className="text-[11px] text-zinc-500 font-bold font-mono tracking-wider uppercase mb-4">Risk Telemetry Indicators</div>
+                {/* Left Column: Visual Pipeline Steps */}
+                <div className="col-span-12 md:col-span-6 flex flex-col justify-between h-full">
+                  <div className="text-xs md:text-sm text-zinc-500 font-bold font-mono tracking-wider uppercase mb-3 flex-none">Analysis Processing Queue</div>
                   
-                  <div className="space-y-4">
-                    {/* Security Check Card */}
-                    <div className="p-4 rounded-xl border border-white/[0.04] bg-white/[0.01] hover:border-cyan-500/20 transition-all duration-300 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center">
-                          <Shield className="w-4.5 h-4.5" />
+                  <div className="flex-1 flex flex-col justify-between gap-3 md:gap-4">
+                    {PIPELINE_PHASES.map((phase, idx) => {
+                      const isActive = idx === pipelineStep;
+                      return (
+                        <div 
+                          key={phase.id} 
+                          className={`relative flex items-center gap-3 md:gap-4 p-2 md:p-3.5 rounded-xl md:rounded-2xl border transition-all duration-500 flex-1 min-h-0 ${isActive ? 'bg-zinc-900/50 border-cyan-500/30 shadow-[0_0_15px_rgba(34,211,238,0.06)] translate-x-2' : 'bg-transparent border-transparent opacity-50'}`}
+                        >
+                          <div className={`w-8 md:w-12 h-8 md:h-12 rounded-xl flex items-center justify-center border transition-all duration-300 ${isActive ? `${phase.bg} ${phase.border} ring-2 ring-cyan-500/20` : 'bg-zinc-900 border-white/[0.04]'}`}>
+                            <phase.icon className={`w-4 md:w-6 h-4 md:h-6 ${isActive ? phase.color : 'text-zinc-500'}`} />
+                          </div>
+                          <div>
+                            <div className={`text-[10px] md:text-sm lg:text-base font-bold transition-colors ${isActive ? 'text-white' : 'text-zinc-400'}`}>{phase.label}</div>
+                            <div className="text-[8px] md:text-xs text-zinc-500 font-mono mt-0.5">
+                              {isActive ? 'Synthesizing data delta...' : 'Processed successfully'}
+                            </div>
+                          </div>
+                          
+                          {/* Connecting moving node line indicator */}
+                          {idx < 4 && (
+                            <div className="absolute left-[24px] md:left-[38px] top-[40px] md:top-[62px] w-0.5 h-6 md:h-10 bg-zinc-900 pointer-events-none">
+                              {isActive && (
+                                <motion.div
+                                  initial={{ top: 0 }}
+                                  animate={{ top: '100%' }}
+                                  transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+                                  className="absolute left-0 w-full h-2.5 bg-cyan-400 rounded-full"
+                                />
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Middle Border line */}
+                <div className="hidden md:flex col-span-1 justify-center items-center">
+                  <div className="h-full w-px bg-white/[0.04]" />
+                </div>
+
+                {/* Right Column: Live Floating Metrics */}
+                <div className="col-span-12 md:col-span-5 flex flex-col justify-between h-full">
+                  <div className="text-xs md:text-sm text-zinc-500 font-bold font-mono tracking-wider uppercase mb-3 flex-none">Risk Telemetry Indicators</div>
+                  
+                  <div className="flex-1 grid grid-rows-5 gap-3 md:gap-4 min-h-0">
+                    {/* 1. Security Check Card */}
+                    <div className="px-3 py-1.5 md:px-5 md:py-2.5 rounded-xl md:rounded-2xl border border-white/[0.04] bg-white/[0.01] hover:border-cyan-500/20 transition-all duration-300 flex items-center justify-between min-h-0">
+                      <div className="flex items-center gap-3 md:gap-4">
+                        <div className="w-8 md:w-12 h-8 md:h-12 rounded-xl flex items-center justify-center bg-rose-500/10 border border-rose-500/20 text-rose-400 flex-none">
+                          <Shield className="w-4 md:w-6 h-4 md:h-6" />
                         </div>
                         <div>
-                          <div className="text-[11px] text-zinc-500 font-semibold font-mono">SECURITY INTEGRITY</div>
-                          <div className="text-sm font-bold text-white mt-0.5">Access Boundary Violation</div>
+                          <div className="text-[9px] md:text-xs text-zinc-500 font-semibold font-mono tracking-wider uppercase">SECURITY</div>
+                          <div className="text-[10px] md:text-sm lg:text-base font-bold text-white mt-0.5">Access Boundary Violation</div>
                         </div>
                       </div>
-                      <span className="text-xs font-mono font-bold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">HIGH RISK</span>
+                      <span className="text-[8px] md:text-xs font-mono font-bold text-rose-400 bg-rose-500/10 px-2 md:px-3 py-0.5 md:py-1 rounded border border-rose-500/20 flex-none">HIGH RISK</span>
                     </div>
 
-                    {/* Architecture Impact Card */}
-                    <div className="p-4 rounded-xl border border-white/[0.04] bg-white/[0.01] hover:border-cyan-500/20 transition-all duration-300 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-lg bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center">
-                          <Layers className="w-4.5 h-4.5" />
+                    {/* 2. Schema Check Card */}
+                    <div className="px-3 py-1.5 md:px-5 md:py-2.5 rounded-xl md:rounded-2xl border border-white/[0.04] bg-white/[0.01] hover:border-cyan-500/20 transition-all duration-300 flex items-center justify-between min-h-0">
+                      <div className="flex items-center gap-3 md:gap-4">
+                        <div className="w-8 md:w-12 h-8 md:h-12 rounded-xl flex items-center justify-center bg-teal-500/10 border border-teal-500/20 text-teal-400 flex-none">
+                          <Layers className="w-4 md:w-6 h-4 md:h-6" />
                         </div>
                         <div>
-                          <div className="text-[11px] text-zinc-500 font-semibold font-mono">ARCHITECTURAL SCHEMAS</div>
-                          <div className="text-sm font-bold text-white mt-0.5">gRPC Endpoint Added</div>
+                          <div className="text-[9px] md:text-xs text-zinc-500 font-semibold font-mono tracking-wider uppercase">SCHEMA</div>
+                          <div className="text-[10px] md:text-sm lg:text-base font-bold text-white mt-0.5">gRPC Endpoint Added</div>
                         </div>
                       </div>
-                      <span className="text-xs font-mono font-bold text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded border border-teal-500/20">STABLE</span>
+                      <span className="text-[8px] md:text-xs font-mono font-bold text-teal-400 bg-teal-500/10 px-2 md:px-3 py-0.5 md:py-1 rounded border border-teal-500/20 flex-none">STABLE</span>
                     </div>
 
-                    {/* Performance Latency Card */}
-                    <div className="p-4 rounded-xl border border-white/[0.04] bg-white/[0.01] hover:border-cyan-500/20 transition-all duration-300 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center">
-                          <Zap className="w-4.5 h-4.5" />
+                    {/* 3. Performance Latency Card */}
+                    <div className="px-3 py-1.5 md:px-5 md:py-2.5 rounded-xl md:rounded-2xl border border-white/[0.04] bg-white/[0.01] hover:border-cyan-500/20 transition-all duration-300 flex items-center justify-between min-h-0">
+                      <div className="flex items-center gap-3 md:gap-4">
+                        <div className="w-8 md:w-12 h-8 md:h-12 rounded-xl flex items-center justify-center bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex-none">
+                          <Zap className="w-4 md:w-6 h-4 md:h-6" />
                         </div>
                         <div>
-                          <div className="text-[11px] text-zinc-500 font-semibold font-mono">PERFORMANCE DRIFT</div>
-                          <div className="text-sm font-bold text-white mt-0.5">Estimated Change</div>
+                          <div className="text-[9px] md:text-xs text-zinc-500 font-semibold font-mono tracking-wider uppercase">PERFORMANCE</div>
+                          <div className="text-[10px] md:text-sm lg:text-base font-bold text-white mt-0.5">Estimated Change</div>
                         </div>
                       </div>
-                      <span className="text-xs font-mono font-bold text-cyan-400 bg-cyan-500/10 px-2.5 py-0.5 rounded border border-cyan-500/20 transition-all duration-300 w-[72px] text-center">{liveLatency}ms</span>
+                      <span className="text-[8px] md:text-xs font-mono font-bold text-cyan-400 bg-cyan-500/10 px-2 md:px-3 py-0.5 md:py-1 rounded border border-cyan-500/20 transition-all duration-300 w-[44px] md:w-[60px] text-center flex-none">{liveLatency}ms</span>
+                    </div>
+
+                    {/* 4. Playwright Generation Card */}
+                    <div className="px-3 py-1.5 md:px-5 md:py-2.5 rounded-xl md:rounded-2xl border border-white/[0.04] bg-white/[0.01] hover:border-cyan-500/20 transition-all duration-300 flex items-center justify-between min-h-0">
+                      <div className="flex items-center gap-3 md:gap-4">
+                        <div className="w-8 md:w-12 h-8 md:h-12 rounded-xl flex items-center justify-center bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex-none">
+                          <FileCode className="w-4 md:w-6 h-4 md:h-6" />
+                        </div>
+                        <div>
+                          <div className="text-[9px] md:text-xs text-zinc-500 font-semibold font-mono tracking-wider uppercase">PLAYWRIGHT GENERATION</div>
+                          <div className="text-[10px] md:text-sm lg:text-base font-bold text-white mt-0.5">Generated Specs: 3</div>
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-0.5 text-[8px] md:text-xs font-mono text-zinc-400 items-start flex-none">
+                        <div className="flex items-center gap-1 text-cyan-400">
+                          <Check className="w-2.5 h-2.5 md:w-3.5 md:h-3.5" />
+                          <span>Security</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-cyan-400">
+                          <Check className="w-2.5 h-2.5 md:w-3.5 md:h-3.5" />
+                          <span>Regression</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-cyan-400">
+                          <Check className="w-2.5 h-2.5 md:w-3.5 md:h-3.5" />
+                          <span>Business Flow</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 5. Vulnerability Score Banner */}
+                    <div className="px-3 py-1.5 md:px-5 md:py-2.5 rounded-xl md:rounded-2xl border border-cyan-500/20 bg-cyan-950/15 flex items-center justify-between shadow-[0_0_15px_rgba(34,211,238,0.02)] min-h-0">
+                      <div className="flex items-center gap-3 md:gap-4">
+                        <div className="w-8 md:w-12 h-8 md:h-12 rounded-xl flex items-center justify-center bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex-none">
+                          <Activity className="w-4 md:w-6 h-4 md:h-6 animate-pulse" />
+                        </div>
+                        <div>
+                          <div className="text-[9px] md:text-xs text-cyan-500 font-bold font-mono tracking-wider uppercase">VULNERABILITY</div>
+                          <div className="text-[8px] md:text-xs text-zinc-400 mt-0.5">Branch risk telemetry score</div>
+                        </div>
+                      </div>
+                      <span className="text-base md:text-xl lg:text-2xl font-mono font-black text-cyan-400 transition-all duration-500 flex-none">{liveRiskScore}%</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Overall Score Banner */}
-                <div className="p-4 rounded-xl border border-cyan-500/20 bg-cyan-950/15 flex items-center justify-between shadow-[0_0_20px_rgba(34,211,238,0.02)]">
-                  <div className="flex items-center gap-3">
-                    <Activity className="w-5 h-5 text-cyan-400 animate-pulse" />
-                    <div>
-                      <div className="text-[11px] text-cyan-500 font-bold font-mono tracking-wider">OVERALL BRANCH FAILURE RISK</div>
-                      <div className="text-xs text-zinc-400 mt-0.5">Aggregated mutation vulnerability score</div>
-                    </div>
-                  </div>
-                  <span className="text-lg font-mono font-black text-cyan-400 transition-all duration-500">{liveRiskScore}%</span>
-                </div>
               </div>
-
             </div>
-          </div>
-        </ScrollReveal>
+          </ScrollReveal>
+        </div>
+
       </section>
 
       {/* Workflow Section Container */}
-      <section id="workflow" className="relative border-t border-white/[0.04] bg-[#070707] py-24 scroll-mt-20">
+      <section id="workflow" className="relative border-t border-white/[0.04] bg-[#070707] py-24 scroll-mt-20 overflow-hidden">
         
         {/* Subtle grid line decoration */}
         <div className="absolute top-0 bottom-0 left-[50%] -translate-x-[50%] w-px bg-gradient-to-b from-white/[0.05] via-white/[0.02] to-transparent pointer-events-none" />
@@ -826,491 +763,487 @@ export default function Landing() {
           </div>
 
           {/* Workflow Stepper Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {[
-              { step: '01', title: 'Connect Repository', desc: 'Link your GitHub codebase to Kryon through secure OAuth in three clicks.' },
-              { step: '02', title: 'Select Pull Request', desc: 'Select active pull request to scan and process branch differences.' },
-              { step: '03', title: 'AI Risk Analysis', desc: 'Analyze structural AST logic changes to flag privilege or logic regressions.' },
-              { step: '04', title: 'Coverage Prediction', desc: 'Map changes to predict coverage gaps inside the newly modified paths.' },
-              { step: '05', title: 'Test Prioritization', desc: 'Isolate files to prioritize executing test modules only where risk is high.' },
-              { step: '06', title: 'Strategic Test Planning', desc: 'Synthesize detailed verification roadmaps targeting code changes.' },
-              { step: '07', title: 'Playwright Generation', desc: 'Synthesize runnable, fully parameterized browser spec code blocks.' },
-              { step: '08', title: 'Merge Decision Intelligence', desc: 'Equip reviewers with structured risk telemetry indicators before landing.' }
-            ].map((node, index) => (
-              <ScrollReveal key={node.step} delay={index * 0.08} className="relative group">
-                {/* Horizontal connections */}
-                {index % 4 !== 3 && (
-                  <div className="hidden lg:block absolute top-[52px] left-[90%] w-[25%] h-px bg-gradient-to-r from-cyan-500/25 to-transparent z-0 pointer-events-none group-hover:from-cyan-400 group-hover:to-teal-400 transition-all duration-300" />
-                )}
-                
-                {/* Visual Card */}
-                <div className="relative z-10 p-px rounded-xl bg-zinc-800/80 hover:bg-gradient-to-b hover:from-cyan-500/30 hover:to-purple-500/30 transition-all duration-500 h-full">
-                  <div className="bg-[#050505] p-6 rounded-[11px] flex flex-col justify-between h-full space-y-4 shadow-[0_4px_30px_rgba(0,0,0,0.4)] group-hover:shadow-[0_4px_40px_rgba(34,211,238,0.03)] transition-all duration-500 border border-white/[0.01]">
-                    
-                    <div className="flex items-center justify-between">
-                      <div className="w-10 h-10 rounded-full border border-white/[0.06] bg-white/[0.02] flex items-center justify-center font-mono text-xs font-bold text-zinc-500 group-hover:text-cyan-400 group-hover:border-cyan-500/20 group-hover:bg-cyan-950/20 transition-all duration-300">
-                        {node.step}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8 items-stretch">
+            {WORKFLOW_STEPS.map((node, index) => {
+              const Icon = STEP_ICONS[index];
+              const isActive = workflowStep === index;
+              const isLineActive = workflowStep === index;
+              const tabletOrder = TABLET_ORDERS[index];
+              const desktopOrder = DESKTOP_ORDERS[index];
+
+              return (
+                <ScrollReveal 
+                  key={node.step} 
+                  delay={index * 0.05} 
+                  className={`relative group flex flex-col h-full order-${index + 1} ${tabletOrder} ${desktopOrder}`}
+                >
+                  {/* Right Line (flows right) */}
+                  {index !== 3 && index !== 7 && (
+                    <div 
+                      className={`absolute top-1/2 right-0 h-[2px] bg-zinc-900 pointer-events-none translate-x-full -translate-y-1/2 z-0 overflow-hidden ${
+                        (index === 0 || index === 1 || index === 2) ? 'lg:block lg:w-8' : 'lg:hidden'
+                      } ${
+                        (index === 0 || index === 4) ? 'md:block md:w-6 lg:w-8' : 'md:hidden'
+                      } hidden`}
+                    >
+                      {isLineActive && (
+                        <motion.div
+                          initial={{ left: '-100%' }}
+                          animate={{ left: '100%' }}
+                          transition={{ duration: 0.8, repeat: Infinity, ease: 'easeInOut' }}
+                          className="absolute top-0 bottom-0 w-1/2 bg-gradient-to-r from-transparent via-cyan-400 to-teal-400"
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {/* Left Line (flows left) */}
+                  {index !== 0 && index !== 4 && (
+                    <div 
+                      className={`absolute top-1/2 left-0 h-[2px] bg-zinc-900 pointer-events-none -translate-x-full -translate-y-1/2 z-0 overflow-hidden ${
+                        (index === 4 || index === 5 || index === 6) ? 'lg:block lg:w-8' : 'lg:hidden'
+                      } ${
+                        (index === 2 || index === 6) ? 'md:block md:w-6 lg:w-8' : 'md:hidden'
+                      } hidden`}
+                    >
+                      {isLineActive && (
+                        <motion.div
+                          initial={{ right: '-100%' }}
+                          animate={{ right: '100%' }}
+                          transition={{ duration: 0.8, repeat: Infinity, ease: 'easeInOut' }}
+                          className="absolute top-0 bottom-0 w-1/2 bg-gradient-to-l from-transparent via-cyan-400 to-teal-400"
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {/* Down Line (flows down) */}
+                  {index !== 7 && (
+                    <div 
+                      className={`absolute bottom-0 left-1/2 w-[2px] bg-zinc-900 pointer-events-none translate-y-full -translate-x-1/2 z-0 overflow-hidden ${
+                        index === 3 ? 'lg:block lg:h-8' : 'lg:hidden'
+                      } ${
+                        (index === 1 || index === 3 || index === 5) ? 'md:block md:h-6 lg:h-8' : 'md:hidden'
+                      } block h-6`}
+                    >
+                      {isLineActive && (
+                        <motion.div
+                          initial={{ top: '-100%' }}
+                          animate={{ top: '100%' }}
+                          transition={{ duration: 0.8, repeat: Infinity, ease: 'easeInOut' }}
+                          className="absolute left-0 right-0 h-1/2 bg-gradient-to-b from-transparent via-cyan-400 to-teal-400"
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {/* Visual Card */}
+                  <div className={`relative z-10 p-px rounded-xl transition-all duration-500 h-full flex flex-col ${
+                    isActive 
+                      ? 'bg-gradient-to-b from-cyan-500/50 to-teal-500/50 shadow-[0_0_30px_rgba(34,211,238,0.15)] scale-[1.02]' 
+                      : 'bg-zinc-800/80 hover:bg-gradient-to-b hover:from-cyan-500/20 hover:to-teal-500/20 hover:-translate-y-1 hover:shadow-[0_0_40px_rgba(34,211,238,0.05)]'
+                  }`}>
+                    <div className={`bg-[#050507]/90 p-6 rounded-[11px] flex flex-col justify-between flex-1 h-full shadow-[0_4px_30px_rgba(0,0,0,0.4)] backdrop-blur-md transition-all duration-500 border border-white/[0.01] ${isActive ? 'bg-[#060b11]/90' : ''}`}>
+                      
+                      <div className="flex items-start justify-between gap-3.5 mb-4">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-all duration-500 flex-none ${
+                          isActive 
+                            ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.1)]' 
+                            : 'bg-zinc-900 border-white/[0.04] text-zinc-500 group-hover:text-zinc-300 group-hover:border-white/[0.08]'
+                        }`}>
+                          <Icon className={`w-5 h-5 ${isActive ? 'animate-pulse' : ''}`} />
+                        </div>
+                        <div className="flex flex-col items-end flex-none">
+                          <div className={`w-2 h-2 rounded-full transition-all duration-500 ${isActive ? 'bg-cyan-400 shadow-[0_0_10px_#22d3ee] scale-125' : 'bg-zinc-800'}`} />
+                          <span className="font-mono text-[9px] text-zinc-600 mt-1.5">NODE_0{node.step}</span>
+                        </div>
                       </div>
-                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-800 group-hover:bg-cyan-500 group-hover:shadow-[0_0_8px_#22d3ee] transition-all duration-300" />
-                    </div>
 
-                    <div>
-                      <h3 className="font-display font-bold text-white text-base tracking-tight group-hover:text-cyan-400 transition-colors duration-300">{node.title}</h3>
-                      <p className="text-xs text-zinc-400 leading-relaxed mt-2">{node.desc}</p>
-                    </div>
+                      <div className="flex-1 flex flex-col justify-between">
+                        <div>
+                          <h3 className={`font-display font-bold text-sm tracking-tight transition-colors duration-300 ${
+                            isActive ? 'text-cyan-400' : 'text-white group-hover:text-cyan-400'
+                          }`}>{node.title}</h3>
+                          <p className="text-xs text-zinc-400 leading-relaxed mt-2.5 mb-4">
+                            {node.desc}
+                          </p>
+                        </div>
 
+                        <div className="flex flex-wrap gap-1.5 mt-auto pt-3 border-t border-white/[0.02]">
+                          {node.metadata.map((meta, i) => (
+                            <span 
+                              key={i} 
+                              className={`text-[9px] font-mono px-2 py-0.5 rounded border transition-colors duration-300 ${
+                                isActive 
+                                  ? 'text-cyan-400 bg-cyan-950/20 border-cyan-500/20 shadow-[0_0_8px_rgba(34,211,238,0.05)]' 
+                                  : 'text-zinc-500 bg-white/[0.01] border-white/[0.03] group-hover:text-zinc-400 group-hover:border-white/[0.06]'
+                              }`}
+                            >
+                              {meta}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                    </div>
                   </div>
-                </div>
-              </ScrollReveal>
-            ))}
+                </ScrollReveal>
+              );
+            })}
+          </div>
+
+          {/* Merge Ready Indicator Banner */}
+          <div className="h-16 mt-16 flex justify-center items-center">
+            <div 
+              className={`inline-flex items-center gap-2.5 px-6 py-3 rounded-full border transition-all duration-500 backdrop-blur-sm ${
+                workflowStep === 8 
+                  ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.15)] opacity-100 scale-100' 
+                  : 'border-white/[0.02] bg-white/[0.01] text-zinc-600 opacity-40 scale-95'
+              }`}
+            >
+              <CheckCircle2 className={`w-5 h-5 ${workflowStep === 8 ? 'animate-bounce text-emerald-400' : ''}`} />
+              <span className="text-sm font-bold tracking-wider uppercase font-mono">
+                {workflowStep === 8 ? 'Merge Ready — Pipeline Successful' : 'Processing Pipeline Stages...'}
+              </span>
+            </div>
           </div>
 
         </div>
       </section>
 
-      {/* Features Section Container */}
+      {/* Features Section Container (Bento Grid Redesign) */}
       <section id="features" className="relative max-w-7xl mx-auto px-6 py-24 scroll-mt-20">
         
-        <div className="text-center max-w-3xl mx-auto mb-20">
+        <div className="text-center max-w-4xl mx-auto mb-24">
           <ScrollReveal>
             <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest bg-cyan-950/40 border border-cyan-800/30 px-3.5 py-1.5 rounded-full">Core Capabilities</span>
           </ScrollReveal>
           <ScrollReveal delay={0.1}>
-            <h2 className="font-display text-3xl md:text-5xl font-black text-white tracking-tight mt-4">
-              Built For Engineering Teams
+            <h2 className="font-display text-4xl md:text-6xl font-black text-white tracking-tight mt-4">
+              Engineering Intelligence For Every Pull Request
             </h2>
           </ScrollReveal>
           <ScrollReveal delay={0.15}>
-            <p className="text-zinc-400 mt-3 text-sm sm:text-base leading-relaxed">
-              SaaS infrastructure designed to optimize speed, visibility, and codebase reliability.
+            <p className="text-zinc-400 mt-4 text-base sm:text-lg md:text-xl leading-relaxed">
+              Kryon transforms pull requests into risk analysis, testing intelligence, architecture insights, and merge confidence before code reaches production.
             </p>
           </ScrollReveal>
         </div>
 
-        {/* Feature Cards Grid (8 items) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {[
-            {
-              icon: Shield,
-              title: 'PR Risk Intelligence',
-              desc: 'Inspect privilege levels, concurrency leaks, and database mutations in real time on incoming code commits.',
-              color: 'group-hover:text-cyan-400'
-            },
-            {
-              icon: Target,
-              title: 'Coverage Prediction',
-              desc: 'Identify untested execution pathways and branch boundaries in newly modified logic before merging.',
-              color: 'group-hover:text-purple-400'
-            },
-            {
-              icon: Beaker,
-              title: 'Test Prioritization',
-              desc: 'Optimize CI run paths to compile and execute only tests impacted by changes, reducing run costs.',
-              color: 'group-hover:text-teal-400'
-            },
-            {
-              icon: Activity,
-              title: 'Strategic Testing',
-              desc: 'Derive clear assertions blueprints targeting high-risk areas of the code changes, saving writer time.',
-              color: 'group-hover:text-cyan-400'
-            },
-            {
-              icon: Terminal,
-              title: 'Playwright Generation',
-              desc: 'Auto-synthesize end-to-end browser spec scripts to verify routing, redirections, and client-side states.',
-              color: 'group-hover:text-purple-400'
-            },
-            {
-              icon: CheckCircle2,
-              title: 'Merge Readiness',
-              desc: 'Translate architectural threat data into a clean, actionable status indicator check checklist inside reviews.',
-              color: 'group-hover:text-teal-400'
-            },
-            {
-              icon: Network,
-              title: 'Architecture Impact',
-              desc: 'Flag breaking schema changes, gRPC parameter mismatches, and downstream endpoint compatibility failures.',
-              color: 'group-hover:text-cyan-400'
-            },
-            {
-              icon: Lock,
-              title: 'Security Intelligence',
-              desc: 'Detect broken function authentication or access control bypasses within your modified logical methods.',
-              color: 'group-hover:text-purple-400'
-            }
-          ].map((item, index) => (
-            <ScrollReveal key={item.title} delay={index * 0.05} className="group">
-              {/* Premium Glow Rotating Card */}
-              <div className="relative p-px rounded-xl bg-zinc-800/80 hover:bg-gradient-to-tr hover:from-cyan-500 hover:via-teal-500 hover:to-purple-500 transition-all duration-500 h-full">
-                <div className="bg-[#050505] p-6 rounded-[11px] h-full flex flex-col justify-between space-y-6 shadow-[0_4px_30px_rgba(0,0,0,0.5)] border border-white/[0.01]">
-                  <div>
-                    {/* Glowing Accent Icon container */}
-                    <div className="w-10 h-10 rounded-lg bg-zinc-900 border border-white/[0.06] flex items-center justify-center text-zinc-400 group-hover:text-cyan-400 group-hover:border-cyan-500/20 group-hover:bg-cyan-950/20 transition-all duration-300">
-                      <item.icon className="w-5 h-5" />
+        {/* Bento Grid (Asymmetric Grid Layout) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto items-stretch">
+          
+          {/* 1. Risk Intelligence (Row 1, Col 1-2 - Wide Card) */}
+          <ScrollReveal delay={0.05} className="h-full md:col-span-2">
+            <div className="group relative p-px rounded-3xl bg-zinc-900/40 hover:bg-gradient-to-tr hover:from-cyan-500/20 hover:to-teal-500/20 transition-all duration-500 h-full shadow-[0_8px_30px_rgba(0,0,0,0.6)]">
+              <div className="bg-[#050507]/90 p-8 rounded-[23px] h-full flex flex-col justify-between border border-white/[0.02] hover:bg-[#060b11]/90 transition-colors duration-500 relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/[0.01] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                
+                <div className="flex flex-col md:flex-row items-stretch justify-between gap-8 h-full">
+                  {/* Left Column */}
+                  <div className="flex flex-col justify-between flex-1 space-y-4 text-left">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-cyan-950/20 border border-cyan-500/10 flex items-center justify-center text-cyan-400">
+                          <Shield className="w-4.5 h-4.5" />
+                        </div>
+                        <h3 className="text-base font-bold text-zinc-100 tracking-tight">Risk Intelligence</h3>
+                      </div>
+                      <p className="text-zinc-400 text-xs font-light leading-relaxed mt-2.5">
+                        Detect hidden security, regression and business logic risks.
+                      </p>
                     </div>
-                    
-                    <h3 className="font-display font-bold text-white text-base tracking-tight mt-5 group-hover:text-white transition-colors duration-200">{item.title}</h3>
-                    <p className="text-xs text-zinc-400 leading-relaxed mt-2.5">{item.desc}</p>
+
+                    <div className="border-t border-white/[0.04] pt-4">
+                      <div className="bg-zinc-950/40 rounded-xl p-3 border border-white/[0.02] space-y-2">
+                        <div className="flex justify-between items-center text-xs font-mono">
+                          <span className="text-zinc-500">Security Risks</span>
+                          <div className="flex-1 border-b border-dashed border-zinc-800/40 mx-2" />
+                          <span className="text-zinc-300 font-semibold">3</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs font-mono">
+                          <span className="text-zinc-500">Regression Risks</span>
+                          <div className="flex-1 border-b border-dashed border-zinc-800/40 mx-2" />
+                          <span className="text-zinc-300 font-semibold">5</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs font-mono">
+                          <span className="text-zinc-500">Logic Risks</span>
+                          <div className="flex-1 border-b border-dashed border-zinc-800/40 mx-2" />
+                          <span className="text-zinc-300 font-semibold">2</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-1 text-[11px] text-cyan-500 font-bold uppercase tracking-wider cursor-pointer group-hover:text-cyan-400 transition-colors duration-200">
-                    <span>Explore details</span>
-                    <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                  {/* Right Column (Primary Metric) */}
+                  <div className="flex flex-col items-start md:items-end justify-center md:border-l md:border-white/[0.04] md:pl-8 min-w-[140px]">
+                    <div className="text-5xl md:text-6xl font-black text-white tracking-tighter font-mono bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
+                      87%
+                    </div>
+                    <div className="text-[9px] text-zinc-500 font-mono tracking-widest uppercase mt-2">
+                      Detection Accuracy
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </ScrollReveal>
+
+          {/* 2. Coverage Intelligence (Row 1, Col 3 - Medium Card) */}
+          <ScrollReveal delay={0.1} className="h-full md:col-span-1">
+            <div className="group relative p-px rounded-3xl bg-zinc-900/40 hover:bg-gradient-to-tr hover:from-cyan-500/20 hover:to-teal-500/20 transition-all duration-500 h-full shadow-[0_8px_30px_rgba(0,0,0,0.6)]">
+              <div className="bg-[#050507]/90 p-6 md:p-8 rounded-[23px] h-full flex flex-col justify-between border border-white/[0.02] hover:bg-[#060b11]/90 transition-colors duration-500 relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/[0.01] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+
+                <div className="flex flex-col justify-between h-full space-y-6 text-left">
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-cyan-950/20 border border-cyan-500/10 flex items-center justify-center text-cyan-400">
+                        <Beaker className="w-4.5 h-4.5" />
+                      </div>
+                      <h3 className="text-base font-bold text-zinc-100 tracking-tight">Coverage Intelligence</h3>
+                    </div>
+                    <p className="text-zinc-400 text-xs font-light leading-relaxed">
+                      Predict untested execution paths before code reaches production.
+                    </p>
+                  </div>
+
+                  <div className="border-t border-white/[0.04] pt-4">
+                    <div className="bg-zinc-950/40 rounded-xl p-3 border border-white/[0.02] space-y-2">
+                      <div className="flex justify-between items-center text-xs font-mono">
+                        <span className="text-zinc-500">Coverage Gap</span>
+                        <div className="flex-1 border-b border-dashed border-zinc-800/40 mx-2" />
+                        <span className="text-zinc-300 font-semibold">14%</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs font-mono">
+                        <span className="text-zinc-500">Untested Files</span>
+                        <div className="flex-1 border-b border-dashed border-zinc-800/40 mx-2" />
+                        <span className="text-zinc-300 font-semibold">7</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs font-mono">
+                        <span className="text-zinc-500">Critical Paths</span>
+                        <div className="flex-1 border-b border-dashed border-zinc-800/40 mx-2" />
+                        <span className="text-zinc-300 font-semibold">2</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-white/[0.04] pt-4">
+                    <div className="text-4xl md:text-5xl font-black text-white font-mono tracking-tighter leading-none">14%</div>
+                    <div className="text-[9px] text-zinc-500 font-mono tracking-widest uppercase mt-1.5">Coverage Gap Found</div>
                   </div>
                 </div>
               </div>
-            </ScrollReveal>
-          ))}
+            </div>
+          </ScrollReveal>
+
+          {/* 3. Merge Intelligence (Row 2, Col 1-2 - Wide Card) */}
+          <ScrollReveal delay={0.15} className="h-full md:col-span-2">
+            <div className="group relative p-px rounded-3xl bg-zinc-900/40 hover:bg-gradient-to-tr hover:from-cyan-500/20 hover:to-teal-500/20 transition-all duration-500 h-full shadow-[0_8px_30px_rgba(0,0,0,0.6)]">
+              <div className="bg-[#050507]/90 p-8 rounded-[23px] h-full flex flex-col justify-between border border-white/[0.02] hover:bg-[#060b11]/90 transition-colors duration-500 relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/[0.01] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+
+                <div className="flex flex-col md:flex-row items-stretch justify-between gap-8 h-full">
+                  {/* Left Column */}
+                  <div className="flex flex-col justify-between flex-1 space-y-4 text-left">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-cyan-950/20 border border-cyan-500/10 flex items-center justify-center text-cyan-400">
+                          <GitMerge className="w-4.5 h-4.5" />
+                        </div>
+                        <h3 className="text-base font-bold text-zinc-100 tracking-tight">Merge Intelligence</h3>
+                      </div>
+                      <p className="text-zinc-400 text-xs font-light leading-relaxed mt-2.5">
+                        Know when a pull request is safe to merge.
+                      </p>
+                    </div>
+
+                    <div className="border-t border-white/[0.04] pt-4">
+                      <div className="bg-zinc-950/40 rounded-xl p-3 border border-white/[0.02] space-y-2">
+                        <div className="flex justify-between items-center text-xs font-mono">
+                          <span className="text-zinc-500">Confidence</span>
+                          <div className="flex-1 border-b border-dashed border-zinc-800/40 mx-2" />
+                          <span className="text-cyan-400 font-semibold">92%</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs font-mono">
+                          <span className="text-zinc-500">Risk Level</span>
+                          <div className="flex-1 border-b border-dashed border-zinc-800/40 mx-2" />
+                          <span className="text-emerald-400 font-semibold">Low</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs font-mono">
+                          <span className="text-zinc-500">Ready To Merge</span>
+                          <div className="flex-1 border-b border-dashed border-zinc-800/40 mx-2" />
+                          <span className="text-emerald-400 font-semibold">Yes</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Column (Primary Metric) */}
+                  <div className="flex flex-col items-start md:items-end justify-center md:border-l md:border-white/[0.04] md:pl-8 min-w-[140px]">
+                    <div className="text-5xl md:text-6xl font-black text-white tracking-tighter font-mono bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
+                      92%
+                    </div>
+                    <div className="text-[9px] text-zinc-500 font-mono tracking-widest uppercase mt-2">
+                      Merge Confidence
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </ScrollReveal>
+
+          {/* 4. Testing Intelligence (Row 2, Col 3 - Medium Card) */}
+          <ScrollReveal delay={0.2} className="h-full md:col-span-1">
+            <div className="group relative p-px rounded-3xl bg-zinc-900/40 hover:bg-gradient-to-tr hover:from-cyan-500/20 hover:to-teal-500/20 transition-all duration-500 h-full shadow-[0_8px_30px_rgba(0,0,0,0.6)]">
+              <div className="bg-[#050507]/90 p-6 md:p-8 rounded-[23px] h-full flex flex-col justify-between border border-white/[0.02] hover:bg-[#060b11]/90 transition-colors duration-500 relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/[0.01] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+
+                <div className="flex flex-col justify-between h-full space-y-6 text-left">
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-cyan-950/20 border border-cyan-500/10 flex items-center justify-center text-cyan-400">
+                        <Terminal className="w-4.5 h-4.5" />
+                      </div>
+                      <h3 className="text-base font-bold text-zinc-100 tracking-tight">Testing Intelligence</h3>
+                    </div>
+                    <p className="text-zinc-400 text-xs font-light leading-relaxed">
+                      Automatically create Security, Regression and Business Flow validation plans.
+                    </p>
+                  </div>
+
+                  <div className="border-t border-white/[0.04] pt-4">
+                    <div className="bg-zinc-950/40 rounded-xl p-3 border border-white/[0.02] space-y-2">
+                      <div className="flex justify-between items-center text-xs font-mono">
+                        <span className="text-zinc-500">Security Tests</span>
+                        <div className="flex-1 border-b border-dashed border-zinc-800/40 mx-2" />
+                        <span className="text-zinc-300 font-semibold">4</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs font-mono">
+                        <span className="text-zinc-500">Regression Tests</span>
+                        <div className="flex-1 border-b border-dashed border-zinc-800/40 mx-2" />
+                        <span className="text-zinc-300 font-semibold">3</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs font-mono">
+                        <span className="text-zinc-500">Business Flows</span>
+                        <div className="flex-1 border-b border-dashed border-zinc-800/40 mx-2" />
+                        <span className="text-zinc-300 font-semibold">2</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-white/[0.04] pt-4">
+                    <div className="text-4xl md:text-5xl font-black text-white font-mono tracking-tighter leading-none">3</div>
+                    <div className="text-[9px] text-zinc-500 font-mono tracking-widest uppercase mt-1.5">Test Plans Generated</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </ScrollReveal>
+
         </div>
       </section>
 
       {/* Product Demo Interactive Section */}
-      <section className="relative border-t border-white/[0.04] bg-[#070707] py-24">
+      <section id="sandbox" className="relative border-t border-white/[0.04] bg-[#070707] pt-24 pb-20">
+        {/* Glow decoration */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[550px] h-[300px] bg-cyan-500/[0.02] rounded-full blur-[120px] pointer-events-none" />
+        
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center max-w-3xl mx-auto mb-16">
             <ScrollReveal>
-              <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest bg-cyan-950/40 border border-cyan-800/30 px-3.5 py-1.5 rounded-full">Interactive Sandbox</span>
+              <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest bg-cyan-950/40 border border-cyan-800/30 px-3.5 py-1.5 rounded-full">INTERACTIVE SANDBOX</span>
             </ScrollReveal>
             <ScrollReveal delay={0.1}>
               <h2 className="font-display text-3xl md:text-5xl font-black text-white tracking-tight mt-4">
-                Experience the Platform
+                See Kryon In Action
               </h2>
             </ScrollReveal>
             <ScrollReveal delay={0.15}>
               <p className="text-zinc-400 mt-3 text-sm sm:text-base leading-relaxed">
-                Interact with the mock workspace below to test how Kryon structures pull requests, maps code changes, and writes Playwright spec files.
+                Explore the actual Kryon workspace used to analyze pull requests, detect risk, and generate testing intelligence.
               </p>
             </ScrollReveal>
           </div>
 
-          {/* Interactive Core Simulator Console */}
+          {/* PRODUCT PREVIEW */}
           <ScrollReveal delay={0.25} y={35}>
-            <div className="grid lg:grid-cols-12 gap-6 items-stretch max-w-6xl mx-auto">
-              
-              {/* Left Panel - Workspace Browser (SaaS Sidebar) */}
-              <div className="lg:col-span-3 rounded-xl border border-white/[0.06] bg-[#050505] p-4 flex flex-col justify-between space-y-6 shadow-[0_4px_30px_rgba(0,0,0,0.6)]">
-                <div>
-                  <div className="text-[10px] text-zinc-500 font-bold font-mono tracking-wider uppercase mb-3">Repositories</div>
-                  <div className="space-y-1">
-                    {[
-                      { id: 'vercel/next.js', active: true },
-                      { id: 'facebook/react', active: false },
-                      { id: 'trpc/trpc', active: false }
-                    ].map((repo) => (
-                      <div 
-                        key={repo.id}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono ${repo.active ? 'bg-white/[0.03] text-white border border-white/[0.05]' : 'text-zinc-500 hover:text-zinc-300 transition-colors'}`}
-                      >
-                        <Database className="w-3.5 h-3.5" />
-                        <span>{repo.id}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="text-[10px] text-zinc-500 font-bold font-mono tracking-wider uppercase mt-6 mb-3">Risk Vectors in PR</div>
-                  <div className="space-y-1.5">
-                    {SCENARIOS.map((scenario) => {
-                      const isSel = scenario.id === selectedScenario.id;
-                      return (
-                        <button
-                          key={scenario.id}
-                          onClick={() => setSelectedScenario(scenario)}
-                          className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-semibold text-left transition-all border ${
-                            isSel 
-                              ? 'bg-cyan-950/20 text-cyan-400 border-cyan-500/20 shadow-[0_0_12px_rgba(34,211,238,0.05)]' 
-                              : 'bg-transparent text-zinc-400 border-transparent hover:text-zinc-200'
-                          }`}
-                        >
-                          <span className="truncate pr-2">{scenario.label}</span>
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold leading-none ${
-                            scenario.aiFindings.riskLevel === 'HIGH' 
-                              ? 'bg-rose-500/10 text-rose-400' 
-                              : scenario.aiFindings.riskLevel === 'MEDIUM' 
-                              ? 'bg-amber-500/10 text-amber-400' 
-                              : 'bg-teal-500/10 text-teal-400'
-                          }`}>{scenario.aiFindings.riskLevel}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+            <div className="relative rounded-xl border border-white/[0.08] bg-[#070709] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.9)] hover:border-cyan-500/10 transition-colors duration-500 max-w-5xl mx-auto">
+              <div className="flex flex-col md:flex-row items-stretch">
+                {/* Sidebar Image */}
+                <div className="w-full md:w-[220px] flex-shrink-0 border-r border-white/[0.04] bg-black/25">
+                  <img 
+                    src="/sidenav.png" 
+                    alt="Kryon Sidebar" 
+                    className="w-full h-auto object-cover select-none pointer-events-none" 
+                  />
                 </div>
-
-                <div className="p-3 bg-white/[0.01] rounded-lg border border-white/[0.04]">
-                  <div className="text-[9px] text-zinc-500 font-semibold font-mono tracking-wider uppercase">Active Scan Engine</div>
-                  <div className="text-xs font-bold text-white mt-1">Kryon-v1.1-Local</div>
-                  <div className="text-[9px] text-zinc-400 mt-0.5">Ollama Model Failover Active</div>
+                {/* Main Dashboard Panel Image */}
+                <div className="flex-1 bg-black/40">
+                  <img 
+                    src="/main.png" 
+                    alt="Kryon Main Dashboard" 
+                    className="w-full h-auto object-cover select-none pointer-events-none" 
+                  />
                 </div>
               </div>
-
-              {/* Main Panel Frame (Split between Diff and Outputs) */}
-              <div className="lg:col-span-9 flex flex-col rounded-xl border border-white/[0.06] bg-[#0a0a0c] shadow-[0_10px_50px_rgba(0,0,0,0.8)] overflow-hidden">
-                
-                {/* Console tabs headers */}
-                <div className="flex border-b border-white/[0.06] bg-zinc-950/60 justify-between items-center px-4">
-                  <div className="flex">
-                    {[
-                      { id: 'risk', label: '🔍 AI Findings', icon: Shield },
-                      { id: 'strategy', label: '📋 Strategic Tests', icon: Beaker },
-                      { id: 'code', label: '💻 Playwright Code', icon: Terminal }
-                    ].map((tab) => (
-                      <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id as any)}
-                        className={`flex items-center gap-2 py-4 px-5 text-xs font-semibold border-b-2 transition-all relative ${
-                          activeTab === tab.id
-                            ? 'border-cyan-400 text-cyan-400 bg-white/[0.01]'
-                            : 'border-transparent text-zinc-500 hover:text-zinc-300'
-                        }`}
-                      >
-                        <tab.icon className="w-3.5 h-3.5" />
-                        <span>{tab.label}</span>
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="flex items-center gap-2 text-[10px] text-zinc-500 font-mono">
-                    <GitBranch className="w-3 h-3 text-zinc-600" />
-                    <span className="text-zinc-400">{selectedScenario.branch}</span>
-                  </div>
-                </div>
-
-                {/* Dashboard body grid (Split view Code vs Output) */}
-                <div className="grid md:grid-cols-12 items-stretch flex-1 min-h-[460px]">
-                  
-                  {/* Left Half: Active Code Diff explorer */}
-                  <div className="md:col-span-6 border-r border-white/[0.05] flex flex-col justify-between bg-black/40">
-                    <div className="p-4 border-b border-white/[0.04] flex items-center justify-between text-xs font-mono text-zinc-500 bg-black/25">
-                      <span className="text-zinc-300 font-semibold">{selectedScenario.filename}</span>
-                      <span>Target Delta Diff</span>
-                    </div>
-
-                    <div className="p-5 font-mono text-[11px] sm:text-xs leading-relaxed flex-1 overflow-x-auto relative min-h-[220px]">
-                      {/* Scanning visual sweep */}
-                      <AnimatePresence>
-                        {isScanning && (
-                          <motion.div
-                            initial={{ top: '0%' }}
-                            animate={{ top: '100%' }}
-                            exit={{ opacity: 0 }}
-                            transition={{ duration: 0.8, ease: 'easeInOut' }}
-                            className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-[0_0_15px_#22d3ee] z-10 pointer-events-none"
-                          />
-                        )}
-                      </AnimatePresence>
-
-                      <div className="space-y-1">
-                        {selectedScenario.diff.map((line, idx) => (
-                          <div
-                            key={idx}
-                            className={`flex items-start -mx-5 px-5 ${
-                              line.type === 'addition'
-                                ? 'bg-emerald-950/20 text-emerald-400 border-l-2 border-emerald-500'
-                                : line.type === 'deletion'
-                                ? 'bg-rose-950/20 text-rose-400 border-l-2 border-rose-500'
-                                : 'text-zinc-500'
-                            }`}
-                          >
-                            <span className="w-8 select-none text-zinc-700 text-right pr-3 font-mono">{idx + 1}</span>
-                            <span className="font-mono whitespace-pre">{line.text}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="p-4 bg-zinc-950/60 border-t border-white/[0.04] text-[11px] text-zinc-500 font-mono">
-                      <span className="font-semibold text-zinc-400">AST Target:</span> {selectedScenario.description}
-                    </div>
-                  </div>
-
-                  {/* Right Half: Output panel content based on activeTab */}
-                  <div className="md:col-span-6 p-6 flex flex-col justify-between bg-black/10">
-                    <div className="flex-1">
-                      
-                      {activeTab === 'risk' && (
-                        <motion.div
-                          key="risk"
-                          initial={{ opacity: 0, y: 5 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="space-y-5 text-left"
-                        >
-                          <div className="flex items-center justify-between border-b border-white/[0.04] pb-3">
-                            <div>
-                              <span className="text-[10px] text-zinc-500 font-bold font-mono uppercase">Telemetry Output</span>
-                              <h4 className="text-white text-base font-bold tracking-tight">Vulnerability Vector Scan</h4>
-                            </div>
-                            <span className={`text-[10px] font-mono font-bold border px-2 py-0.5 rounded leading-none ${
-                              selectedScenario.aiFindings.riskLevel === 'HIGH'
-                                ? 'bg-rose-500/10 border-rose-500/20 text-rose-400'
-                                : selectedScenario.aiFindings.riskLevel === 'MEDIUM'
-                                ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
-                                : 'bg-teal-500/10 border-teal-500/20 text-teal-400'
-                            }`}>{selectedScenario.aiFindings.riskLevel} RISK</span>
-                          </div>
-
-                          <div className="space-y-4">
-                            <div>
-                              <span className="text-[11px] text-zinc-400 font-bold block">Executive Summary</span>
-                              <p className="text-xs text-zinc-400 mt-1 leading-relaxed">{selectedScenario.aiFindings.summary}</p>
-                            </div>
-
-                            <div className="grid sm:grid-cols-2 gap-4">
-                              <div>
-                                <span className="text-[11px] text-zinc-300 font-bold block mb-1">Muted Risks</span>
-                                <ul className="space-y-1">
-                                  {selectedScenario.aiFindings.risks.map((risk, idx) => (
-                                    <li key={idx} className="text-[11px] text-zinc-400 flex items-start gap-1 leading-normal">
-                                      <span className="text-cyan-500">•</span>
-                                      <span>{risk}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                              <div>
-                                <span className="text-[11px] text-zinc-300 font-bold block mb-1">Suggested Steps</span>
-                                <ul className="space-y-1">
-                                  {selectedScenario.aiFindings.recommendations.map((rec, idx) => (
-                                    <li key={idx} className="text-[11px] text-zinc-400 flex items-start gap-1 leading-normal">
-                                      <span className="text-emerald-500">✓</span>
-                                      <span>{rec}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-
-                      {activeTab === 'strategy' && (
-                        <motion.div
-                          key="strategy"
-                          initial={{ opacity: 0, y: 5 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="space-y-5 text-left"
-                        >
-                          <div className="border-b border-white/[0.04] pb-3">
-                            <span className="text-[10px] text-zinc-500 font-bold font-mono uppercase">AI Strategy Synthesis</span>
-                            <p className="text-zinc-300 text-xs mt-1 leading-relaxed italic">
-                              "{selectedScenario.testStrategy.strategy}"
-                            </p>
-                          </div>
-
-                          <div className="space-y-3">
-                            <span className="text-[11px] text-zinc-400 font-bold block">Target Spec Test Cases</span>
-                            <div className="space-y-2">
-                              {selectedScenario.testStrategy.tests.map((test, idx) => (
-                                <div key={idx} className="border border-white/[0.05] bg-white/[0.01] p-3 rounded-lg text-xs space-y-1.5 shadow-sm">
-                                  <div className="flex items-center justify-between">
-                                    <span className="font-semibold text-zinc-200">{test.title}</span>
-                                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-950/45 text-cyan-400 border border-cyan-800/20">{test.category}</span>
-                                  </div>
-                                  <p className="text-zinc-400 text-[11px] leading-relaxed"><span className="text-zinc-500 font-bold">Scenario:</span> {test.scenario}</p>
-                                  <p className="text-zinc-400 text-[11px] leading-relaxed"><span className="text-zinc-500 font-bold">Expected:</span> {test.expected}</p>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-
-                      {activeTab === 'code' && (
-                        <motion.div
-                          key="code"
-                          initial={{ opacity: 0, y: 5 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="space-y-4 text-left"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-zinc-500 font-mono">playwright.spec.ts</span>
-                            <button
-                              onClick={handleCopy}
-                              className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-white/[0.08] hover:border-white/[0.15] bg-white/[0.02] hover:bg-white/[0.05] text-zinc-400 hover:text-white transition-all text-xs font-semibold cursor-pointer"
-                            >
-                              {copiedCode ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-                              <span>{copiedCode ? 'Copied!' : 'Copy Code'}</span>
-                            </button>
-                          </div>
-
-                          <div className="relative rounded-lg bg-black/50 p-4 font-mono text-[11px] sm:text-xs overflow-x-auto text-zinc-300 border border-white/[0.04] leading-relaxed max-h-[300px]">
-                            <pre className="font-mono whitespace-pre">{selectedScenario.playwrightCode}</pre>
-                          </div>
-                        </motion.div>
-                      )}
-
-                    </div>
-
-                    {/* Blast Radius Visual Foot */}
-                    <div className="mt-6 pt-4 border-t border-white/[0.04] flex flex-wrap items-center justify-between gap-3 text-[10px] text-zinc-500 font-mono">
-                      <span>IMPACT BLAST RADIUS:</span>
-                      <div className="flex items-center gap-3">
-                        {Object.entries(selectedScenario.aiFindings.blastRadius).map(([key, val]) => (
-                          <span
-                            key={key}
-                            className={`flex items-center gap-1.5 ${val ? 'text-cyan-400 font-bold' : 'text-zinc-700'}`}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full ${val ? 'bg-cyan-400 shadow-[0_0_8px_#22d3ee]' : 'bg-zinc-800'}`} />
-                            <span className="uppercase text-[9px] tracking-wider">{key}</span>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-
-                  </div>
-
-                </div>
-
-              </div>
-
             </div>
           </ScrollReveal>
         </div>
       </section>
 
-      {/* Intelligence Metric Counters Section */}
+      {/* Product Generates Capabilities Grid Section */}
       <section id="intelligence" className="relative border-t border-white/[0.04] py-24 scroll-mt-20">
         
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center max-w-3xl mx-auto mb-20">
             <ScrollReveal>
-              <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest bg-cyan-950/40 border border-cyan-800/30 px-3.5 py-1.5 rounded-full">Engineering Analytics</span>
+              <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest bg-cyan-950/40 border border-cyan-800/30 px-3.5 py-1.5 rounded-full">Outputs</span>
             </ScrollReveal>
             <ScrollReveal delay={0.1}>
               <h2 className="font-display text-3xl md:text-5xl font-black text-white tracking-tight mt-4">
-                Why Teams Use Kryon
+                What Kryon Generates
               </h2>
             </ScrollReveal>
             <ScrollReveal delay={0.15}>
               <p className="text-zinc-400 mt-3 text-sm sm:text-base leading-relaxed">
-                Quantitative infrastructure efficiency parameters verified across modern engineering pipelines.
+                Every analysis run produces structured engineering intelligence before code reaches production.
               </p>
             </ScrollReveal>
           </div>
 
-          {/* Cards metrics */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* 3x2 Grid of Feature Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {[
-              { label: 'Faster Review Cycles', value: 73, suffix: '%', desc: 'Average reduction in Pull Request review cycle duration.' },
-              { label: 'Earlier Risk Detection', value: 98, suffix: '%', desc: 'Regressions and security violations intercepted before production.' },
-              { label: 'Smarter Testing Integration', value: 10, suffix: 'x', desc: 'Compute resources optimization mapping only changed dependencies.' },
-              { label: 'Reduced Production Bugs', value: 94, suffix: '%', desc: 'Decrease in logic escape bugs hitting public systems.' }
-            ].map((stat, idx) => (
-              <ScrollReveal key={stat.label} delay={idx * 0.08} className="text-center">
-                <div className="p-px rounded-xl bg-zinc-800/80 hover:bg-gradient-to-tr hover:from-cyan-500 hover:to-purple-500 transition-all duration-300 h-full">
-                  <div className="bg-[#050505] p-8 rounded-[11px] h-full flex flex-col justify-between space-y-4 shadow-[0_4px_30px_rgba(0,0,0,0.5)] border border-white/[0.01]">
-                    
-                    <div className="text-4xl md:text-6xl font-display font-black text-cyan-400 tracking-tight">
-                      <AnimatedCounter value={stat.value} suffix={stat.suffix} />
-                    </div>
+              { title: 'Risk Analysis', desc: 'Detect security, regression and business logic risks.', icon: Shield },
+              { title: 'Coverage Prediction', desc: 'Identify untested execution paths.', icon: Beaker },
+              { title: 'Test Strategy', desc: 'Generate targeted validation plans.', icon: Target },
+              { title: 'Playwright Specs', desc: 'Create executable browser testing scenarios.', icon: Terminal },
+              { title: 'Architecture Impact', desc: 'Understand downstream service and schema effects.', icon: Network },
+              { title: 'Merge Intelligence', desc: 'Determine release confidence before deployment.', icon: GitMerge }
+            ].map((feature, idx) => {
+              const Icon = feature.icon;
+              return (
+                <ScrollReveal key={feature.title} delay={idx * 0.05}>
+                  <div className="group relative p-px rounded-2xl bg-zinc-900/40 hover:bg-gradient-to-tr hover:from-cyan-500/20 hover:to-teal-500/20 transition-all duration-300 h-full shadow-lg">
+                    <div className="bg-[#050507]/90 p-6 rounded-[15px] h-full flex flex-col justify-between border border-white/[0.02] hover:bg-[#060b11]/90 transition-colors duration-500 relative overflow-hidden">
+                      <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/[0.01] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                      
+                      <div className="space-y-4 text-left">
+                        <div className="w-8 h-8 rounded-lg bg-cyan-950/20 border border-cyan-500/10 flex items-center justify-center text-cyan-400 group-hover:border-cyan-400/30 transition-colors duration-300">
+                          <Icon className="w-4 h-4" />
+                        </div>
+                        <h3 className="font-display font-semibold text-white text-base tracking-tight">{feature.title}</h3>
+                        <p className="text-xs text-zinc-400 leading-relaxed">{feature.desc}</p>
+                      </div>
 
-                    <div>
-                      <h3 className="font-display font-semibold text-white text-base tracking-tight">{stat.label}</h3>
-                      <p className="text-xs text-zinc-400 leading-relaxed mt-2">{stat.desc}</p>
                     </div>
-
                   </div>
-                </div>
-              </ScrollReveal>
-            ))}
+                </ScrollReveal>
+              );
+            })}
           </div>
 
         </div>
@@ -1320,7 +1253,7 @@ export default function Landing() {
       <section className="relative border-t border-white/[0.04] py-24">
         
         {/* Neon glowing center decoration */}
-        <div className="absolute top-[50%] left-[50%] -translate-x-[50%] -translate-y-[50%] w-[380px] h-[380px] bg-cyan-500/[0.04] rounded-full blur-[140px] pointer-events-none" />
+        <div className="absolute top-[50%] left-[50%] -translate-x-[50%] -translate-y-[50%] w-[380px] h-[380px] bg-cyan-500/[0.02] rounded-full blur-[140px] pointer-events-none" />
 
         <div className="max-w-7xl mx-auto px-6 relative z-10">
           
@@ -1331,47 +1264,48 @@ export default function Landing() {
               <div className="absolute inset-0 bg-[linear-gradient(to_right,#16161c_1px,transparent_1px),linear-gradient(to_bottom,#16161c_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_80%,transparent_100%)] pointer-events-none animate-grid-drift opacity-60" />
 
               <div className="relative z-10 text-center max-w-3xl mx-auto space-y-6">
-                <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest font-mono">Continuous Risk Control</span>
-                <h2 className="font-display text-3xl md:text-6xl font-extrabold text-white tracking-tight leading-tight">
-                  Ship Safer Code With <br /> AI Risk Intelligence
+                <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest font-mono">ENGINEERING INTELLIGENCE</span>
+                
+                <h2 className="font-display text-3xl md:text-5xl font-black text-white tracking-tight leading-tight max-w-2xl mx-auto">
+                  Understand Pull Request Risk Before Merge
                 </h2>
-                <p className="text-zinc-400 text-sm sm:text-base leading-relaxed max-w-xl mx-auto">
-                  Integrate Kryon into your GitHub pipeline in under 3 minutes. Stop regressions, secure credentials, and auto-synthesize test specs before landing in production.
+                
+                <p className="text-zinc-400 text-sm sm:text-base leading-relaxed max-w-2xl mx-auto font-light">
+                  Connect your repository, analyze pull requests, identify hidden risk, predict coverage gaps, and generate targeted testing intelligence before code reaches production.
                 </p>
 
-                {/* Counter Stats checks */}
-                <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 pt-4 text-xs font-mono text-zinc-500">
+                {/* Feature Chips */}
+                <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 pt-4 text-xs font-mono text-zinc-400">
                   <span className="flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-cyan-400" />
-                    <span>Free Open-Source Tier</span>
+                    <Check className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Pull Request Risk Analysis</span>
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-cyan-400" />
-                    <span>Self-Hosted Local Engine Options</span>
+                    <Check className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Coverage Gap Prediction</span>
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-cyan-400" />
-                    <span>SOC-2 Type II Compliant Architectures</span>
+                    <Check className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Playwright Test Generation</span>
                   </span>
                 </div>
 
-                {/* Primary CTA Buttons */}
-                <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-6 max-w-sm mx-auto sm:max-w-none">
+                {/* Primary and Secondary CTA Buttons */}
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-6 max-w-md mx-auto sm:max-w-none">
                   <MagneticButton
                     onClick={() => router.push('/auth')}
-                    className="w-full sm:w-auto px-8 h-12.5 rounded-lg bg-gradient-to-r from-cyan-500 to-teal-500 text-black font-bold text-sm tracking-wide shadow-[0_0_20px_rgba(34,211,238,0.2)] hover:shadow-[0_0_35px_rgba(34,211,238,0.4)] transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer group"
+                    className="w-full sm:w-auto px-8 h-12 rounded-lg bg-gradient-to-r from-cyan-500 to-teal-500 text-black font-bold text-sm tracking-wide shadow-[0_0_20px_rgba(34,211,238,0.2)] hover:shadow-[0_0_35px_rgba(34,211,238,0.4)] transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer group"
                   >
                     <span>Connect GitHub Repository</span>
                     <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                   </MagneticButton>
 
-                  <Button
-                    onClick={() => router.push('/auth')}
-                    variant="outline"
-                    className="w-full sm:w-auto border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.06] text-zinc-300 h-12.5 px-8 rounded-lg text-sm font-semibold tracking-wide transition-all duration-300 cursor-pointer"
+                  <button
+                    onClick={() => smoothScrollTo('sandbox')}
+                    className="w-full sm:w-auto px-8 h-12 rounded-lg border border-white/[0.08] hover:border-white/[0.15] bg-white/[0.01] hover:bg-white/[0.03] text-white font-medium text-sm tracking-wide transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    Start Free Analysis
-                  </Button>
+                    <span>View Demo Analysis</span>
+                  </button>
                 </div>
 
               </div>
@@ -1384,47 +1318,47 @@ export default function Landing() {
 
       {/* Animated Accordion FAQ Section Container */}
       <section id="faq" className="relative border-t border-white/[0.04] py-24 scroll-mt-20">
-        <div className="max-w-4xl mx-auto px-6">
+        <div className="max-w-5xl mx-auto px-6">
           
-          <div className="text-center max-w-2xl mx-auto mb-16">
+          <div className="text-center max-w-5xl mx-auto mb-24">
             <ScrollReveal>
               <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest bg-cyan-950/40 border border-cyan-800/30 px-3.5 py-1.5 rounded-full">Knowledge Base</span>
             </ScrollReveal>
             <ScrollReveal delay={0.1}>
-              <h2 className="font-display text-3xl md:text-5xl font-black text-white tracking-tight mt-4">
+              <h2 className="font-display text-4xl md:text-6xl font-black text-white tracking-tight mt-4 md:whitespace-nowrap">
                 Frequently Asked Questions
               </h2>
             </ScrollReveal>
             <ScrollReveal delay={0.15}>
-              <p className="text-zinc-400 mt-2 text-sm sm:text-base leading-relaxed">
-                Everything you need to know about the AI risk prediction and testing pipeline.
+              <p className="text-zinc-400 mt-4 text-sm sm:text-base leading-relaxed max-w-2xl mx-auto font-light">
+                Everything you need to know about the risk prediction and testing pipeline.
               </p>
             </ScrollReveal>
           </div>
 
           {/* Accordion Questions container */}
           <ScrollReveal delay={0.2}>
-            <div className="border-t border-white/[0.04]">
+            <div className="space-y-4 max-w-3xl mx-auto">
               {[
                 {
                   question: 'What does Kryon analyze?',
-                  answer: 'Kryon analyzes pull requests across three distinct vectors: security privileges (access control and privilege escalations), architectural impact (breaking changes in API gateways, database schemas, or RPC contracts), and performance characteristics. By parsing your AST and running diff analysis, Kryon models code risk before tests even run.'
+                  answer: 'Kryon analyzes pull requests to identify security risks, regression risks, architectural changes, coverage gaps, and areas that may require additional validation before merge.'
                 },
                 {
-                  question: 'How is this different from code review tools?',
-                  answer: 'Standard code review tools check style guidelines and lint rules. Kryon is a deep-risk intelligence engine. It understands code semantics, predicts failure paths, and synthesizes target verification test specifications specifically to cover changes in the PR, functioning like an automated staff engineer on your team.'
-                },
-                {
-                  question: 'Does Kryon generate tests?',
-                  answer: 'Yes. Kryon maps the exact delta of your code changes, detects coverage gaps in the modified logical paths, and generates precise Jest unit and integration tests. This allows developers to immediately write assertions targeting the code they just wrote, without writing boilerplate.'
+                  question: 'How is Kryon different from code review tools?',
+                  answer: 'Traditional code review tools focus on code quality, style rules, and static analysis.\n\nKryon focuses on pull request intelligence by identifying risk, predicting coverage gaps, and generating targeted testing recommendations based on code changes.'
                 },
                 {
                   question: 'Can Kryon generate Playwright specs?',
-                  answer: 'Absolutely. For changes affecting key business flows, API gateways, or UI endpoints, Kryon synthesizes ready-to-run Playwright end-to-end specifications. It mocks user states, configures routing boundary conditions, and generates complete test files that you can directly copy into your test suites.'
+                  answer: 'Yes. Kryon can generate Playwright testing specifications based on the behavior affected by a pull request, helping teams validate critical user flows faster.'
                 },
                 {
-                  question: 'How does risk prediction work?',
-                  answer: 'Kryon runs your code changes through a multi-tiered pipeline: first, a static AST parser maps structural modifications; second, a local rule engine flags known code anti-patterns; third, an AI orchestration layer maps these changes against runtime dependencies, estimating blast radius and assigning a risk score from 0 to 100.'
+                  question: 'Does Kryon modify my code?',
+                  answer: 'No. Kryon only analyzes pull requests and generates risk reports, testing intelligence, and recommendations.\n\nYour source code is never modified automatically.'
+                },
+                {
+                  question: 'When should teams use Kryon?',
+                  answer: 'Kryon is designed to be used before code review and before merge, helping engineers identify risks and testing gaps early in the development cycle.'
                 }
               ].map((faq, index) => (
                 <FAQAccordionItem
@@ -1441,52 +1375,100 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Professional Multi-Column Footer Container */}
-      <footer className="border-t border-white/[0.04] bg-[#050505] py-20 text-xs text-zinc-500 relative z-10">
-        <div className="max-w-7xl mx-auto px-6 grid grid-cols-2 md:grid-cols-5 gap-8">
+      {/* Refactored Developer-focused Centered Footer */}
+      <footer className="border-t border-white/[0.04] bg-[#030303] py-10 text-xs text-zinc-500 relative z-10">
+        <div className="max-w-6xl mx-auto px-6 space-y-6">
           
-          {/* Brand Col column */}
-          <div className="col-span-2 space-y-6">
-            <KryonLogo size="md" />
-            <p className="max-w-sm leading-relaxed text-zinc-400">
-              Kryon is the risk intelligence platform for modern engineering teams. Understand risk, predict coverage gaps, and write Playwright specs before merging.
-            </p>
-            <div className="text-[10px] text-zinc-600 font-mono">
-              © {new Date().getFullYear()} Kryon Systems, Inc. All rights reserved.
+          {/* Main 2-Column Content Section */}
+          <div className="w-full flex flex-col md:flex-row items-start justify-between gap-8">
+            
+            {/* LEFT SIDE: Branding */}
+            <div className="flex flex-col items-start text-left space-y-3 max-w-md">
+              <KryonLogo size="lg" />
+              <div className="space-y-1.5">
+                <h3 className="font-display text-sm font-semibold tracking-tight text-zinc-200">
+                  Engineering Intelligence For Every Pull Request
+                </h3>
+                <p className="text-zinc-500 text-xs font-light leading-relaxed">
+                  Analyze risk before merge. <br className="hidden sm:inline" />
+                  Generate testing intelligence automatically.
+                </p>
+              </div>
             </div>
+
+            {/* RIGHT SIDE: Navigation */}
+            <nav className="flex flex-row md:flex-col items-center md:items-end flex-wrap gap-x-6 gap-y-2 text-sm font-semibold pt-1">
+              <button 
+                onClick={() => smoothScrollTo('features')} 
+                className="text-zinc-300 hover:text-cyan-400 hover:drop-shadow-[0_0_8px_rgba(34,211,238,0.6)] transition-all duration-300 cursor-pointer"
+              >
+                Features
+              </button>
+              <button 
+                onClick={() => smoothScrollTo('workflow')} 
+                className="text-zinc-300 hover:text-cyan-400 hover:drop-shadow-[0_0_8px_rgba(34,211,238,0.6)] transition-all duration-300 cursor-pointer"
+              >
+                Workflow
+              </button>
+              <button 
+                onClick={() => smoothScrollTo('faq')} 
+                className="text-zinc-300 hover:text-cyan-400 hover:drop-shadow-[0_0_8px_rgba(34,211,238,0.6)] transition-all duration-300 cursor-pointer"
+              >
+                FAQ
+              </button>
+              <a 
+                href="https://github.com/Priyanshu-ai902/E2E" 
+                target="_blank" 
+                rel="noreferrer" 
+                className="text-zinc-300 hover:text-cyan-400 hover:drop-shadow-[0_0_8px_rgba(34,211,238,0.6)] transition-all duration-300 inline-flex items-center gap-1"
+              >
+                GitHub ↗
+              </a>
+            </nav>
+
           </div>
 
-          {/* Product Section columns */}
-          <div className="space-y-4 text-left">
-            <h4 className="text-white font-bold text-xs tracking-wider uppercase font-display">Product</h4>
-            <ul className="space-y-2.5">
-              <li><button onClick={() => smoothScrollTo('features')} className="hover:text-zinc-300 transition-colors text-left cursor-pointer">Features</button></li>
-              <li><button onClick={() => smoothScrollTo('workflow')} className="hover:text-zinc-300 transition-colors text-left cursor-pointer">Pipeline Workflow</button></li>
-              <li><button onClick={() => smoothScrollTo('intelligence')} className="hover:text-zinc-300 transition-colors text-left cursor-pointer">Intelligence Analytics</button></li>
-              <li><a href="/auth" className="hover:text-zinc-300 transition-colors">Start Analysis</a></li>
-            </ul>
+          {/* Compact Inline Badges Row */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-2">
+            {[
+              'Risk Analysis',
+              'Coverage Prediction',
+              'Playwright Generation',
+              'Merge Intelligence'
+            ].map((badge) => (
+              <span 
+                key={badge}
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-cyan-950/20 text-cyan-400 border border-cyan-500/10 hover:border-cyan-500/20 hover:bg-cyan-950/30 transition-all duration-300 cursor-default select-none"
+              >
+                <span className="w-1 h-1 rounded-full bg-cyan-500" />
+                {badge}
+              </span>
+            ))}
           </div>
 
-          {/* Company Section columns */}
-          <div className="space-y-4 text-left">
-            <h4 className="text-white font-bold text-xs tracking-wider uppercase font-display">Company</h4>
-            <ul className="space-y-2.5">
-              <li><a href="https://github.com" target="_blank" rel="noreferrer" className="hover:text-zinc-300 transition-colors">About Us</a></li>
-              <li><a href="https://github.com" target="_blank" rel="noreferrer" className="hover:text-zinc-300 transition-colors">Security Index</a></li>
-              <li><a href="https://github.com" target="_blank" rel="noreferrer" className="hover:text-zinc-300 transition-colors">Careers</a></li>
-              <li><a href="https://github.com" target="_blank" rel="noreferrer" className="hover:text-zinc-300 transition-colors">Contact</a></li>
-            </ul>
-          </div>
+          {/* Divider */}
+          <div className="w-full border-t border-white/[0.04]" />
 
-          {/* Resources & Compliance columns */}
-          <div className="space-y-4 text-left">
-            <h4 className="text-white font-bold text-xs tracking-wider uppercase font-display">Resources</h4>
-            <ul className="space-y-2.5">
-              <li><a href="https://github.com" target="_blank" rel="noreferrer" className="hover:text-zinc-300 transition-colors">GitHub Repository</a></li>
-              <li><a href="https://github.com" target="_blank" rel="noreferrer" className="hover:text-zinc-300 transition-colors">API Documents</a></li>
-              <li><a href="https://github.com" target="_blank" rel="noreferrer" className="hover:text-zinc-300 transition-colors">Privacy Policy</a></li>
-              <li><a href="https://github.com" target="_blank" rel="noreferrer" className="hover:text-zinc-300 transition-colors">Terms of Service</a></li>
-            </ul>
+          {/* Bottom Row */}
+          <div className="w-full flex flex-col md:flex-row items-center justify-between gap-4 text-[11px] text-zinc-600">
+            <div className="font-mono">
+              <span>© 2026 Kryon</span>
+            </div>
+            
+            <div className="text-zinc-500 font-sans tracking-wide text-xs text-center md:text-left">
+              Built for developers shipping production code.
+            </div>
+            
+            <div>
+              <a 
+                href="https://github.com/Priyanshu-ai902/E2E" 
+                target="_blank" 
+                rel="noreferrer" 
+                className="hover:text-cyan-400 hover:drop-shadow-[0_0_6px_rgba(34,211,238,0.6)] transition-all duration-300 font-medium"
+              >
+                GitHub ↗
+              </a>
+            </div>
           </div>
 
         </div>

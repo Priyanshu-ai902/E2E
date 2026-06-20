@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, timestamp, jsonb, uniqueIndex, unique } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, integer, timestamp, jsonb, uniqueIndex, unique, boolean } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 export const prAnalyses = pgTable('pr_analyses', {
@@ -285,3 +285,47 @@ export type NewTestPrioritization = typeof testPrioritizations.$inferInsert;
 
 export type AICallLogRecord = typeof aiCallLogs.$inferSelect;
 export type NewAICallLog = typeof aiCallLogs.$inferInsert;
+
+// Users Table
+export const users = pgTable('users', {
+  id: serial('id').primaryKey(),
+  name: text('name'),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash'),
+  emailVerified: boolean('email_verified').default(false).notNull(),
+  verificationToken: text('verification_token'),
+  verificationExpires: timestamp('verification_expires'),
+  githubConnected: boolean('github_connected').default(false).notNull(),
+  githubId: text('github_id').unique(),
+  githubUsername: text('github_username'),
+  githubAvatar: text('github_avatar'),
+  githubAccessToken: text('github_access_token'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Sessions Table
+export const sessions = pgTable('sessions', {
+  id: text('id').primaryKey(),
+  userId: integer('user_id').references(() => users.id).notNull(),
+  token: text('token').unique().notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export const usersRelations = relations(users, ({ many }) => ({
+  sessions: many(sessions),
+}));
+
+export const sessionsRelations = relations(sessions, ({ one }) => ({
+  user: one(users, {
+    fields: [sessions.userId],
+    references: [users.id],
+  }),
+}));
+
+export type UserRecord = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+
+export type SessionRecord = typeof sessions.$inferSelect;
+export type NewSession = typeof sessions.$inferInsert;
