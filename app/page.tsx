@@ -508,12 +508,49 @@ export default function Landing() {
       </header>
 
       {/* Hero Section Container */}
-      <section className="relative max-w-[1440px] mx-auto px-6 md:px-10 xl:px-16 pt-16 md:pt-28 pb-20 text-center flex flex-col items-center overflow-x-hidden">
+      <section className="relative max-w-[1440px] mx-auto px-6 md:px-10 xl:px-16 pt-12 md:pt-20 pb-20 text-center flex flex-col items-center overflow-x-hidden">
         
         {/* Section 1: Hero Centered Copy Content */}
         <div className="flex flex-col items-center text-center max-w-5xl mx-auto w-full">
-          {/* Subtitle Badge */}
+
+          {/* Product Badges (Peerlist & Product Hunt) - Immediately below Navbar */}
           <ScrollReveal delay={0} y={15}>
+            <div className="mb-8 flex flex-wrap items-center justify-center gap-4 sm:gap-6">
+              <a
+                href="https://peerlist.io/psjcoder/project/kryon-ai"
+                target="_blank"
+                rel="noreferrer"
+                className="transition-transform duration-300 hover:scale-105 inline-block"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="https://peerlist.io/api/v1/projects/embed/PRJHJKNO7KP77DBA93AKODPJ7KNQ9Q?showUpvote=true&theme=light"
+                  alt="Kryon AI"
+                  style={{ width: 'auto', height: '60px' }}
+                  className="h-[54px] w-auto rounded-lg shadow-md"
+                />
+              </a>
+
+              <a
+                href="https://www.producthunt.com/products/kryon-ai?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-kryon-ai"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="transition-transform duration-300 hover:scale-105 inline-block"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  alt="Kryon AI - AI that catches risky PRs before they break prod | Product Hunt"
+                  width={250}
+                  height={54}
+                  src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1214071&theme=light&t=1786368471328"
+                  className="h-[54px] w-auto rounded-lg shadow-md"
+                />
+              </a>
+            </div>
+          </ScrollReveal>
+
+          {/* Subtitle Badge */}
+          <ScrollReveal delay={0.05} y={15}>
             <div 
               onClick={() => router.push('/auth')}
               className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-cyan-500/20 bg-cyan-950/20 hover:bg-cyan-950/30 text-cyan-400 text-[11px] font-bold tracking-wide uppercase mb-8 cursor-pointer hover:border-cyan-500/40 transition-all duration-300"
